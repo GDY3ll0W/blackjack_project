@@ -1,0 +1,10 @@
+^C:\USERS\ADOLF\BLACKJACK_PROJECT\BUILD\WINDOWS\X64\CMAKEFILES\A7416BDD34825CF03DD3418132C5FB6E\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/adolf/blackjack_project/windows -BC:/Users/adolf/blackjack_project/build/windows/x64 --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/adolf/blackjack_project/build/windows/x64/blackjack_project.slnx
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

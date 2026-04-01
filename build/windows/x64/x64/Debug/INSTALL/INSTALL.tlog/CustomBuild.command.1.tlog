@@ -1,0 +1,10 @@
+^C:\USERS\ADOLF\BLACKJACK_PROJECT\BUILD\WINDOWS\X64\CMAKEFILES\A7416BDD34825CF03DD3418132C5FB6E\INSTALL_FORCE.RULE
+setlocal
+cd .
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
