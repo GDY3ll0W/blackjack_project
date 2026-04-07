@@ -1,3 +1,5 @@
+const Deck = require('./logic/deck');
+const myDeck = new Deck(5);
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -14,15 +16,15 @@ const io = new Server(server, {
 
 io.on('connection', (socket) => {
     console.log('a user connected', socket.id);
-        
-    socket.on('join_room', (data) => {
-        socket.join(data.room);
-        console.log(`User joined room: ${data.room}`);
-        
-io.to(data.room).emit('system message', `$
-{data.nickname} has joined the room.`);
-     });
-     socket.on(`disconnect`, () => {
+
+    socket.on('playerAction', (data) => {
+        if (data.action === 'hit') {
+            const dealtCard = myDeck.dealCard();
+            socket.emit('cardDealt', { card: dealtCard });
+        }
+    });
+
+    socket.on('disconnect', () => {
         console.log('user disconnected');
     });
 });
