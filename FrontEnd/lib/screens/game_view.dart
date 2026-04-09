@@ -1,109 +1,179 @@
 import 'package:flutter/material.dart';
-import '../services/socket_service.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 class GameView extends StatefulWidget {
   final String nickname;
-  const GameView({super.key, required this.nickname});
 
+  const GameView({super.key, required this.nickname});
   @override
-  State<GameView> createState() => _GameViewState();
+  _GameViewState createState() => _GameViewState();
 }
 
 class _GameViewState extends State<GameView> {
-  final SocketService _socketService = SocketService();
-  List<Map<String, String>> playerHand = [];
+  late IO.Socket socket;
+  
+  // Game State Variables
+  List playerHand = [];
+  List dealerHand = [];
+  int balance = 100;
+  int playerScore = 0;
+  String gameMessage = "Place your bet to start!";
+  bool isPlaying = false;
 
   @override
   void initState() {
     super.initState();
-    _socketService.connect();
-    _socketService.socket.on('cardDealt', (data) {
-      if (mounted) {
-        setState(() {
-          playerHand.add({
-            'suit': data['card']['suit'].toString(),
-            'rank': data['card']['rank'].toString(),
-          });
-        });
-      }
+    connectToServer();
+  }
+
+  void connectToServer() {
+    socket = IO.io('https://nigel-nonexplainable-ernestina.ngrok-free.dev', <String, dynamic>{
+      'transports': ['websocket'],
+      'autoConnect': true,
+      'extraHeaders': {'ngrok-skip-browser-warning': 'true'}, // For ngrok compatibility
+    });
+
+    socket.connect();
+
+    // Listens for the $100 initial balance
+    socket.on('initialState', (data) {
+      setState(() => balance = data['balance']);
+    });
+
+    // Listens for the initial deal 
+    socket.on('gameStarted', (data) {
+      setState(() {
+        playerHand = data['playerHand'];
+        dealerHand = data['dealerHand'];
+        balance = data['balance'];
+        playerScore = data['playerScore'];
+        isPlaying = true;
+        gameMessage = "Hit or Stand?";
+      });
+    });
+
+    socket.on('cardDealt', (data) {
+      setState(() {
+        playerHand.add(data['card']);
+        playerScore = data['score'];
+      });
+    });
+
+    socket.on('gameOver', (data) {
+      setState(() {
+        gameMessage = data['message'];
+        dealerHand = data['dealerHand']; // Reveals the hidden card
+        balance = data['newBalance'];
+        isPlaying = false;
+      });
     });
   }
 
-  void _handleHit() {
-    _socketService.socket.emit('playerAction', {'action': 'hit'});
+  void placeBet(int amount) {
+    socket.emit('placeBet', {'amount': amount});
+  }
+
+  void playerAction(String action) {
+    socket.emit('playerAction', {'action': action});
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1A472A),
-      appBar: AppBar(
-        title: Text('Player: ${widget.nickname}'),
-        backgroundColor: Colors.black,
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text('YOUR HAND', style: TextStyle(color: Colors.white70, fontSize: 16)),
-            const SizedBox(height: 20),
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 10.0,
-              runSpacing: 10.0,
-              children: playerHand.map((card) => PlayingCardWidget(
-                suit: card['suit']!,
-                rank: card['rank']!,
-              )).toList(),
-            ),
-            const SizedBox(height: 50),
-            ElevatedButton(
-              onPressed: _handleHit,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red[900],
-                padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 20),
+      backgroundColor: Colors.green[900], // Classic Casino Felt
+      appBar: AppBar(title: Text("Blackjack Dev Build"), backgroundColor: Colors.black),
+      body: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // 1. Dealer Section
+          Column(
+            children: [
+              Text("Dealer", style: TextStyle(color: Colors.white, fontSize: 20)),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: dealerHand.map((card) => CardWidget(card)).toList(),
               ),
-              child: const Text('HIT', style: TextStyle(fontSize: 24, color: Colors.white)),
-            ),
-          ],
-        ),
+            ],
+          ),
+
+          // 2. Info / Message Section
+          Column(
+            children: [
+              Text(gameMessage, style: TextStyle(color: Colors.yellow, fontSize: 24, fontWeight: FontWeight.bold)),
+              if (isPlaying) Text("Score: $playerScore", style: TextStyle(color: Colors.white)),
+            ],
+          ),
+
+          // 3. Player Section
+          Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: playerHand.map((card) => CardWidget(card)).toList(),
+              ),
+              Text("You (Balance: \$$balance)", style: TextStyle(color: Colors.white, fontSize: 20)),
+              SizedBox(height: 20),
+              
+              // Action Buttons or Chip Buttons
+              isPlaying ? buildActionButtons() : buildChipButtons(),
+            ],
+          ),
+          SizedBox(height: 20),
+        ],
       ),
+    );
+  }
+
+  Widget buildChipButtons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [5, 10, 25, 50].map((val) {
+        return ElevatedButton(
+          style: ElevatedButton.styleFrom(shape: CircleBorder(), padding: EdgeInsets.all(20), backgroundColor: Colors.red),
+          onPressed: () => placeBet(val),
+          child: Text("\$$val"),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget buildActionButtons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        ElevatedButton(onPressed: () => playerAction('hit'), child: Text("Hit")),
+        ElevatedButton(onPressed: () => playerAction('stand'), child: Text("Stand"), style: ElevatedButton.styleFrom(backgroundColor: Colors.blue)),
+      ],
     );
   }
 }
 
-class PlayingCardWidget extends StatelessWidget {
-  final String suit;
-  final String rank;
-
-  const PlayingCardWidget({super.key, required this.suit, required this.rank});
+// Simple Placeholder for Card Visuals
+class CardWidget extends StatelessWidget {
+  final dynamic card;
+  CardWidget(this.card);
 
   @override
   Widget build(BuildContext context) {
-    Color cardColor = (suit == 'Hearts' || suit == 'Diamonds') ? Colors.red : Colors.black;
-    String suitChar = suit == 'Spades' ? '♠' : suit == 'Hearts' ? '♥' : suit == 'Diamonds' ? '♦' : '♣';
-
+    bool isHidden = card['rank'] == 'Hidden';
     return Container(
-      width: 70,
-      height: 100,
+      margin: EdgeInsets.all(5),
+      padding: EdgeInsets.all(10),
+      width: 60,
+      height: 90,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHidden ? Colors.blue : Colors.white,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.black, width: 2),
+        border: Border.all(color: Colors.black),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Align(
-              alignment: Alignment.topLeft,
-              child: Text(rank, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: cardColor)),
-            ),
-            Text(suitChar, style: TextStyle(fontSize: 32, color: cardColor)),
-          ],
-        ),
-      ),
+      child: isHidden 
+        ? Center(child: Icon(Icons.help_outline, color: Colors.white))
+        : Column(
+            children: [
+              Text(card['rank'], style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(card['suit'][0]), // First letter of Suit
+            ],
+          ),
     );
   }
 }

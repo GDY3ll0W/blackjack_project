@@ -2,11 +2,12 @@ services:
   backend:
     build: ./BackEnd
     ports:
-    - "3000:3000"
-    
+      - "80:3000"
+    volumes:
+      - ./FrontEnd/build/web:/usr/src/app/public
+    environment:
+      - NODE_ENV=production
+
   frontend:
     build: ./FrontEnd
-    ports:
-      - "8080:80"
-    depends_on:
-      - backend
+    

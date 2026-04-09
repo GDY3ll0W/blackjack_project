@@ -11,6 +11,8 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  SocketService().connect();
+
   runApp(const MyApp());
 }
 

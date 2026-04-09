@@ -1,7 +1,14 @@
 FROM ghcr.io/cirruslabs/flutter:latest AS build
+
+USER root
 WORKDIR /app
+
+COPY pubspec.yaml pubspec.lock ./
+
+RUN flutter pub get --no-example
+
 COPY . .
-RUN flutter pub get
+
 RUN flutter build web
 
 FROM nginx:alpine

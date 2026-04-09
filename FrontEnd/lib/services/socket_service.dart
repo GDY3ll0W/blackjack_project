@@ -4,17 +4,19 @@ class SocketService {
   late io.Socket socket;
 
   void connect() {
-    socket = io.io('http://localhost:3000', <String, dynamic>{
+    // IMPORTANT: Replace the URL with your current ngrok address
+    socket = io.io('https://nigel-nonexplainable-ernestina.ngrok-free.dev', <String, dynamic>{
       'transports': ['websocket'],
-      'autoConnect': false,
+      'autoConnect': true, // Changed to true so it connects immediately
     });
 
     socket.connect();
 
     socket.onConnect((_) {
-      print('Connected to Backend');
-      socket.emit('join_room', {'nickname': 'User', 'room': 'Table1'});
+      print('--- Connected to Blackjack Backend ---');
     });
+
+    socket.onDisconnect((_) => print('Disconnected from Backend'));
   }
 
   void disconnect() {
