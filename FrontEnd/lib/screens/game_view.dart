@@ -85,7 +85,7 @@ class _GameViewState extends State<GameView> {
     }
 
     currentBet = amount;
-    setState(() => gameMessage = 'Current bet: \$$currentBet');
+    setState(() => gameMessage = 'Current bet: \Ω$currentBet');
   }
 
   void dealRound() {
@@ -205,10 +205,10 @@ class _GameViewState extends State<GameView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Text('Balance: \$$balance', 
+                    Text('Balance: \Ω$balance', 
                       style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
                     const SizedBox(height: 4),
-                    Text('Current Bet: \$$currentBet', 
+                    Text('Current Bet: \Ω$currentBet', 
                       style: const TextStyle(color: Colors.white, fontSize: 20, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
                     const SizedBox(height: 16),
                     const Text('Dealer', 
@@ -308,7 +308,7 @@ class _GameViewState extends State<GameView> {
                   boxShadow: const [BoxShadow(blurRadius: 5, color: Colors.black54, offset: Offset(2, 2))],
                 ),
                 child: Center(
-                  child: Text('\$$value', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                  child: Text('\Ω$value', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                 ),
               ),
             );
