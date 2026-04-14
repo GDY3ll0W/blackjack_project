@@ -2,12 +2,17 @@ services:
   backend:
     build: ./BackEnd
     ports:
-      - "80:3000"
+      - "3000:3000"
     volumes:
-      - ./FrontEnd/build/web:/usr/src/app/public
+      - ./BackEnd:/app
+      - /app/node_modules # This prevents local modules from overriding container modules
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=development
 
   frontend:
     build: ./FrontEnd
-    
+    # This is for Flutter web development/hosting
+    ports:
+      - "8080:80"
+    volumes:
+      - ./FrontEnd:/app
