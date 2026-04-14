@@ -60,7 +60,7 @@ flutter:
   assets:
     - assets/images/cards/
     - assets/images/avatars/
-    - assets/images/table/
+    - assets/images/table/DeepBlackjack.png
     - assets/sounds/
 
   # The following line ensures that the Material Icons font is

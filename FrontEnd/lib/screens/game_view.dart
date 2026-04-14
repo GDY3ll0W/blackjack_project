@@ -179,67 +179,111 @@ class _GameViewState extends State<GameView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.green[900],
       appBar: AppBar(
         title: const Text('Blackjack Dev Build'),
-        backgroundColor: Colors.black,
+        backgroundColor: Colors.black.withOpacity(0.8),
       ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text('Balance: \$$balance', style: const TextStyle(color: Colors.white, fontSize: 22)),
-            const SizedBox(height: 4),
-            Text('Current Bet: \$$currentBet', style: const TextStyle(color: Colors.white, fontSize: 20)),
-            const SizedBox(height: 16),
-            const Text('Dealer', style: TextStyle(color: Colors.white, fontSize: 20)),
-            const SizedBox(height: 8),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: dealerHand.asMap().entries.map((entry) {
-                  final index = entry.key;
-                  final card = entry.value;
-                  final hidden = hideDealerHoleCard && index == 1;
-                  return PlayingCardWidget(
-                    imageUrl: hidden
-                        ? 'https://deckofcardsapi.com/static/img/back.png'
-                        : cardImageUrl(card),
-                    rank: hidden ? null : card.rank,
-                    suit: hidden ? null : card.suit,
-                    hidden: hidden,
-                  );
-                }).toList(),
+      body: Stack(
+        children: [
+          // 1. BACKGROUND ART LAYER (UPDATED FOR ZOOM OUT)
+          Container(
+            width: double.infinity,
+            height: double.infinity,
+            color: const Color(0xFF4A6F3C), // A green extracted from the artwork to fill gaps
+            alignment: Alignment.center, // Keeps the creature face in the center
+            child: Image.asset(
+              "assets/images/table/DeepBlackjack.png",
+              fit: BoxFit.contain, // This forces the *whole* image to be visible
+            ),
+          ),
+          
+          // 2. UI LAYER (Unchanged from previous)
+          SafeArea(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text('Balance: \$$balance', 
+                      style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
+                    const SizedBox(height: 4),
+                    Text('Current Bet: \$$currentBet', 
+                      style: const TextStyle(color: Colors.white, fontSize: 20, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
+                    const SizedBox(height: 16),
+                    const Text('Dealer', 
+                      style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    
+                    // Dealer Hand Display
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: dealerHand.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final card = entry.value;
+                          final hidden = hideDealerHoleCard && index == 1;
+                          return PlayingCardWidget(
+                            imageUrl: hidden
+                                ? 'https://deckofcardsapi.com/static/img/back.png'
+                                : cardImageUrl(card),
+                            rank: hidden ? null : card.rank,
+                            suit: hidden ? null : card.suit,
+                            hidden: hidden,
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 24),
+                    // Game Message with semi-transparent background for readability
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: Text(gameMessage, 
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.yellow, fontSize: 24, fontWeight: FontWeight.bold)),
+                    ),
+                    
+                    const SizedBox(height: 16),
+                    const Text('Player', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    
+                    // Player Hand Display
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: playerHand.map((card) {
+                          return PlayingCardWidget(
+                            imageUrl: cardImageUrl(card),
+                            rank: card.rank,
+                            suit: card.suit,
+                            hidden: false,
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 12),
+                    Text('Score: ${calculateScore(playerHand)}', 
+                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    
+                    const SizedBox(height: 24),
+                    if (!isPlaying) buildBetSection(),
+                    if (isPlaying) buildActionButtons(),
+                    const SizedBox(height: 12),
+                    buildControlButtons(),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 24),
-            Text(gameMessage, style: const TextStyle(color: Colors.yellow, fontSize: 24, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            const Text('Player', style: TextStyle(color: Colors.white, fontSize: 20)),
-            const SizedBox(height: 8),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: playerHand.map((card) {
-                  return PlayingCardWidget(
-                    imageUrl: cardImageUrl(card),
-                    rank: card.rank,
-                    suit: card.suit,
-                    hidden: false,
-                  );
-                }).toList(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text('Score: ${calculateScore(playerHand)}', style: const TextStyle(color: Colors.white, fontSize: 18)),
-            const SizedBox(height: 24),
-            if (!isPlaying) buildBetSection(),
-            if (isPlaying) buildActionButtons(),
-            const SizedBox(height: 12),
-            buildControlButtons(),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -255,15 +299,16 @@ class _GameViewState extends State<GameView> {
             return GestureDetector(
               onTap: () => placeBet(value),
               child: Container(
-                width: 70,
-                height: 70,
+                width: 60,
+                height: 60,
                 decoration: BoxDecoration(
                   color: betColors[value],
-                  borderRadius: BorderRadius.circular(12),
+                  shape: BoxShape.circle, // Circular chips look better on the art
                   border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [BoxShadow(blurRadius: 5, color: Colors.black54, offset: Offset(2, 2))],
                 ),
                 child: Center(
-                  child: Text('\$$value', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  child: Text('\$$value', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                 ),
               ),
             );
@@ -272,8 +317,13 @@ class _GameViewState extends State<GameView> {
         const SizedBox(height: 16),
         ElevatedButton(
           onPressed: dealRound,
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 14)),
-          child: const Text('Start Round', style: TextStyle(fontSize: 16)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green[800], 
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+          ),
+          child: const Text('Start Round', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         ),
       ],
     );
@@ -285,14 +335,22 @@ class _GameViewState extends State<GameView> {
       children: [
         ElevatedButton(
           onPressed: hit,
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.red, padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 14)),
-          child: const Text('Hit', style: TextStyle(fontSize: 16)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red[700], 
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 14),
+          ),
+          child: const Text('Hit', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(width: 16),
         ElevatedButton(
           onPressed: stand,
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 14)),
-          child: const Text('Stand', style: TextStyle(fontSize: 16)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue[700], 
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 14),
+          ),
+          child: const Text('Stand', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ),
       ],
     );
@@ -302,10 +360,10 @@ class _GameViewState extends State<GameView> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        ElevatedButton(
+        TextButton(
           onPressed: resetGame,
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800], padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12)),
-          child: const Text('Reset', style: TextStyle(fontSize: 16)),
+          style: TextButton.styleFrom(foregroundColor: Colors.white70),
+          child: const Text('Reset Table', style: TextStyle(fontSize: 14, decoration: TextDecoration.underline)),
         ),
       ],
     );
@@ -333,24 +391,24 @@ class PlayingCardWidget extends StatelessWidget {
       height: 100,
       margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 4, offset: const Offset(0, 2))],
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 6, offset: const Offset(2, 4))],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
         child: Image.network(
           imageUrl,
           fit: BoxFit.cover,
           errorBuilder: (context, error, stackTrace) {
             return Container(
-              color: hidden ? Colors.blue : Colors.white,
+              color: hidden ? Colors.blue[900] : Colors.white,
               alignment: Alignment.center,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (!hidden) Text(rank ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  if (!hidden) Text(suit != null ? suit![0] : ''),
-                  if (hidden) const Icon(Icons.help_outline, color: Colors.white),
+                  if (!hidden) Text(rank ?? '', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+                  if (!hidden) Text(suit != null ? suit![0] : '', style: const TextStyle(color: Colors.black)),
+                  if (hidden) const Icon(Icons.casino, color: Colors.white),
                 ],
               ),
             );
