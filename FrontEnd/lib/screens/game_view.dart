@@ -4,8 +4,9 @@ import '../models/card.dart' as model_card;
 
 class GameView extends StatefulWidget {
   final String nickname;
+  final String avatarPath;
 
-  const GameView({super.key, required this.nickname});
+  const GameView({super.key, required this.nickname, required this.avatarPath});
 
   @override
   _GameViewState createState() => _GameViewState();
@@ -538,6 +539,26 @@ class _GameViewState extends State<GameView> {
             ),
           ),
           
+          // PLAYER AVATAR (Left side)
+          Positioned(
+            left: 135,
+            top: 374,
+            child: Container(
+              width: 90,
+              height: 90,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.amber, width: 3),
+                shape: BoxShape.circle,
+              ),
+              child: ClipOval(
+                child: Image.asset(
+                  widget.avatarPath,
+                  fit: BoxFit.cover,
+                ), 
+              ),
+            ),
+          ),
+          
           // UI LAYER
           SafeArea(
             child: SingleChildScrollView(
@@ -561,7 +582,12 @@ class _GameViewState extends State<GameView> {
                     const SizedBox(height: 16),
                     
                     // DEALER
-                    const Text('Dealer', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                    Image.asset(
+                      'assets/images/dealer/Dealer.png',
+                      width: 60,
+                      height: 60,
+                      fit: BoxFit.contain,
+                    ),
                     const SizedBox(height: 8),
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'game_view.dart';
+import 'avatar_selection_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -21,7 +21,7 @@ class _LoginScreenState extends State<LoginScreen> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => GameView(nickname: _nicknameController.text),
+            builder: (context) => AvatarSelectionScreen(nickname: _nicknameController.text),
           ),
         );
       } catch (e) {

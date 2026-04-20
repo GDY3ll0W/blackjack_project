@@ -59,7 +59,8 @@ flutter:
 
   assets:
     - assets/images/cards/
-    - assets/images/avatars/
+    - assets/images/avatar/Octo.png
+    - assets/images/dealer/Dealer.png
     - assets/images/table/DeepBlackjack.png
     - assets/sounds/
 
