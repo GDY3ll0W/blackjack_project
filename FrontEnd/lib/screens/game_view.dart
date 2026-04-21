@@ -29,6 +29,7 @@ class _GameViewState extends State<GameView> {
   String gameMessage = 'Place a bet to start';
   bool gameActive = false;
   bool hideDealerHoleCard = true;
+  bool hasWon = false;
 
   final List<int> betValues = [5, 10, 20, 25, 50, 100, 150, 200];
   final Map<int, Color> betColors = {
@@ -41,6 +42,13 @@ class _GameViewState extends State<GameView> {
     150: Colors.brown,
     200: Colors.amber,
   };
+
+  String formatNumber(int num) {
+    return num.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
 
   @override
   void initState() {
@@ -64,6 +72,7 @@ class _GameViewState extends State<GameView> {
     gameMessage = 'Place a bet to start';
     gameActive = false;
     hideDealerHoleCard = true;
+    hasWon = false;
     setState(() {});
   }
 
@@ -114,7 +123,7 @@ class _GameViewState extends State<GameView> {
     if (!gameActive) return false;
     final hand = playerHands[currentHandIndex];
     if (hand.length != 2) return false;
-    return balance >= playerBets[currentHandIndex];
+    return balance >= 2 * playerBets[currentHandIndex];
   }
 
   void placeBet(int amount) {
@@ -129,7 +138,7 @@ class _GameViewState extends State<GameView> {
     }
 
     currentBet += amount;
-    setState(() => gameMessage = 'Current bet: Ω$currentBet');
+    setState(() => gameMessage = 'Current bet: Ω${formatNumber(currentBet)}');
   }
 
   void clearBet() {
@@ -422,37 +431,7 @@ class _GameViewState extends State<GameView> {
     if (amount <= 0) return;
     balance += amount;
     loanDebt += amount;
-    setState(() => gameMessage = '💵 You took out a \$$amount loan. Future winnings will repay it.');
-  }
-
-  Future<void> customLoan() async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Custom Loan'),
-          content: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(hintText: 'Enter loan amount'),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(null), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.of(context).pop(controller.text), child: const Text('OK')),
-          ],
-        );
-      },
-    );
-
-    if (result == null) return;
-    final amount = int.tryParse(result);
-    if (amount == null || amount <= 0) {
-      setState(() => gameMessage = 'Enter a valid loan amount!');
-      return;
-    }
-
-    takeLoan(amount);
+    setState(() => gameMessage = '💵 You took out a \$${formatNumber(amount)} loan. Future winnings will repay it.');
   }
 
   void letItRide() {
@@ -472,7 +451,7 @@ class _GameViewState extends State<GameView> {
     }
 
     currentBet = lastRideAmount;
-    setState(() => gameMessage = '🎲 Let It Ride set your next bet to \$$lastRideAmount');
+    setState(() => gameMessage = '🎲 Let It Ride set your next bet to \$${formatNumber(lastRideAmount)}');
   }
 
   Future<void> customBet() async {
@@ -568,13 +547,13 @@ class _GameViewState extends State<GameView> {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     // TOP STATS BAR
-                    Text('Balance: Ω$balance', 
+                    Text('Balance: Ω${formatNumber(balance)}', 
                       style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
                     const SizedBox(height: 4),
-                    Text('Current Bet: Ω$currentBet', 
+                    Text('Current Bet: Ω${formatNumber(currentBet)}', 
                       style: const TextStyle(color: Colors.white, fontSize: 20, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
                     const SizedBox(height: 4),
-                    Text('Loan Debt: Ω$loanDebt', 
+                    Text('Loan Debt: Ω${formatNumber(loanDebt)}', 
                       style: const TextStyle(color: Colors.orange, fontSize: 20, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
                     const SizedBox(height: 4),
                     Text('Wins: $wins | Losses: $losses | Pushes: $pushes', 
@@ -654,7 +633,7 @@ class _GameViewState extends State<GameView> {
                                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                                 ),
                                 const SizedBox(height: 4),
-                                Text('Bet: Ω${playerBets[i]}', style: const TextStyle(color: Colors.lightGreen, fontWeight: FontWeight.bold, fontSize: 16)),
+                                Text('Bet: Ω${formatNumber(playerBets[i])}', style: const TextStyle(color: Colors.lightGreen, fontWeight: FontWeight.bold, fontSize: 16)),
                                 const SizedBox(height: 16),
                               ],
                             ),
@@ -784,7 +763,7 @@ class _GameViewState extends State<GameView> {
                                     return;
                                   }
                                   currentBet = balance;
-                                  setState(() => gameMessage = 'Current bet: \u03a9$currentBet');
+                                  setState(() => gameMessage = 'Current bet: Ω${formatNumber(currentBet)}');
                                 },
                                 child: Container(
                                   width: 70,
@@ -856,12 +835,12 @@ class _GameViewState extends State<GameView> {
                                 child: const Text('Take \$500 Loan', style: TextStyle(fontWeight: FontWeight.bold)),
                               ),
                               ElevatedButton(
-                                onPressed: customLoan,
+                                onPressed: () => takeLoan(1000),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.indigo[900],
                                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                                 ),
-                                child: const Text('Custom Loan', style: TextStyle(fontWeight: FontWeight.bold)),
+                                child: const Text('Take \$1,000 Loan', style: TextStyle(fontWeight: FontWeight.bold)),
                               ),
                             ],
                           ),
