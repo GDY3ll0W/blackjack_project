@@ -35,8 +35,57 @@ const io = new Server(server, {
  */
 const gameRooms = new Map();
 
+/**
+ * ROOM CODE GENERATOR
+ * Generates a unique 6-character alphanumeric room code
+ */
+function generateRoomCode() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    // Ensure the code doesn't already exist
+    if (gameRooms.has(code)) {
+        return generateRoomCode(); // Recursively generate if collision
+    }
+    return code;
+}
+
 io.on('connection', (socket) => {
     console.log(`>>> Client Connected: ${socket.id}`);
+
+    /**
+     * CREATE ROOM LOGIC
+     * Generates a new room code and initializes a game session
+     */
+    socket.on('createRoom', () => {
+        // Clean up previous rooms if user is switching
+        const rooms = Array.from(socket.rooms);
+        rooms.forEach(r => { if(r !== socket.id) socket.leave(r); });
+
+        const roomCode = generateRoomCode();
+        
+        // Create a new GameState for the room
+        gameRooms.set(roomCode, new GameState());
+        console.log(`[Room ${roomCode}] - New Game Room Created by ${socket.id}`);
+
+        // Join the creator to the room
+        socket.join(roomCode);
+        const roomSize = io.sockets.adapter.rooms.get(roomCode)?.size || 0;
+
+        console.log(`[Room ${roomCode}] - User ${socket.id} joined as creator (${roomSize}/6)`);
+
+        // Send the room code back to the user
+        socket.emit('roomCreated', { 
+            code: roomCode,
+            balance: gameRooms.get(roomCode).playerBalance,
+            activePlayers: roomSize
+        });
+
+        // Notify everyone in the room
+        io.to(roomCode).emit('playerJoined', { count: roomSize });
+    });
 
     /**
      * JOIN ROOM LOGIC
