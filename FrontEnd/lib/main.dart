@@ -11,7 +11,7 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  SocketService().connect();
+  SocketService().connect("testRoom"); // Connect to the backend with a test room code
 
   runApp(const MyApp());
 }

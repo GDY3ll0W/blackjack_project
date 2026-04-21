@@ -3,5 +3,6 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
-EXPOSE 3000
+# Match the default port in your server.js
+EXPOSE 8080
 CMD ["node", "server.js"]

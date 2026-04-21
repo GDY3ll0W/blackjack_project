@@ -58,11 +58,11 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/images/cards/
+
     - assets/images/avatar/Octo.png
     - assets/images/dealer/Dealer.png
     - assets/images/table/DeepBlackjack.png
-    - assets/sounds/
+    
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

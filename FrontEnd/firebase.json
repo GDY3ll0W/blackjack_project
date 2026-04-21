@@ -1,1 +1,39 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"blackjack-80760","appId":"1:549147796202:android:22f2f4cba3ebf7c6426d93","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"blackjack-80760","configurations":{"android":"1:549147796202:android:22f2f4cba3ebf7c6426d93","ios":"1:549147796202:ios:24e8fc8b9c8ece0b426d93","macos":"1:549147796202:ios:24e8fc8b9c8ece0b426d93","web":"1:549147796202:web:2f8dd5a3a973085b426d93","windows":"1:549147796202:web:f58bee5d49cf15fa426d93"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "blackjack-80760",
+          "appId": "1:549147796202:android:22f2f4cba3ebf7c6426d93",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "blackjack-80760",
+          "configurations": {
+            "android": "1:549147796202:android:22f2f4cba3ebf7c6426d93",
+            "ios": "1:549147796202:ios:24e8fc8b9c8ece0b426d93",
+            "macos": "1:549147796202:ios:24e8fc8b9c8ece0b426d93",
+            "web": "1:549147796202:web:2f8dd5a3a973085b426d93",
+            "windows": "1:549147796202:web:f58bee5d49cf15fa426d93"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

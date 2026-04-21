@@ -6,78 +6,160 @@ const GameState = require('./models/gameState');
 
 const app = express();
 const server = http.createServer(app);
+
+/**
+ * 1. CLOUD CONFIGURATION
+ * Google Cloud Run assigns a dynamic port via the PORT environment variable.
+ */
+const PORT = process.env.PORT || 8080;
+
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Configure Socket.io with CORS for Flutter/Web development
+
+/**
+ * 2. SOCKET.IO & CORS
+ * origin: "*" allows your Firebase Hosting URL to connect.
+ */
 const io = new Server(server, {
     cors: {
         origin: "*",
         methods: ["GET", "POST"],
-        allowedHeaders: ["ngrok-skip-browser-warning"],
         credentials: true
     }
 });
 
-const game = new GameState();
+
+/**
+ * 3. MULTIPLAYER STATE MANAGEMENT
+ * We use a Map to keep track of different game instances by their room code.
+ */
+const gameRooms = new Map();
 
 io.on('connection', (socket) => {
-    console.log('--- Dev Client Connected ---');
-    console.log('ID:', socket.id);
+    console.log(`>>> Client Connected: ${socket.id}`);
 
-    // Immediately sends the player's starting balance to $100 when they connect
-    socket.emit('initialState', { 
-        balance: game.playerBalance 
+    /**
+     * JOIN ROOM LOGIC
+     * This handles creating a "table" for up to 6 classmates.
+     */
+    socket.on('joinRoom', (roomCode) => {
+        // Clean up previous rooms if user is switching
+        const rooms = Array.from(socket.rooms);
+        rooms.forEach(r => { if(r !== socket.id) socket.leave(r); });
+
+        socket.join(roomCode);
+
+        // If room doesn't exist, create a new GameState for it
+        if (!gameRooms.has(roomCode)) {
+            gameRooms.set(roomCode, new GameState());
+            console.log(`[Room ${roomCode}] - New Game Session Created`);
+        }
+
+        const currentGame = gameRooms.get(roomCode);
+        const roomSize = io.sockets.adapter.rooms.get(roomCode)?.size || 0;
+
+        // Limit the room to 6 players
+        if (roomSize > 6) {
+            socket.emit('error', { message: "Table is full! Use a different code." });
+            socket.leave(roomCode);
+            return;
+        }
+
+        console.log(`[Room ${roomCode}] - User ${socket.id} joined (${roomSize}/6)`);
+
+        // Send the initial state back to the user
+        socket.emit('initialState', { 
+            balance: currentGame.playerBalance,
+            room: roomCode,
+            activePlayers: roomSize
+        });
+
+        // Notify everyone else at the table
+        io.to(roomCode).emit('playerJoined', { count: roomSize });
     });
 
-    // Handles Betting and Game Start
+    /**
+     * GAMEPLAY: PLACE BET
+     */
     socket.on('placeBet', (data) => {
-        console.log(`Bet Received: $${data.amount}`);
-        
-        const result = game.startNewGame(data.amount);
-        
-        if (result.error) {
-            console.log('Error:', result.error);
-            socket.emit('error', { message: result.error });
-        } else {
-            console.log('Game Started. Hands Dealt.');
-            // Send hands, score, and updates balance to Flutter
-            socket.emit('gameStarted', result);
+        const roomCode = Array.from(socket.rooms).find(r => r !== socket.id);
+        const currentGame = gameRooms.get(roomCode);
+
+        if (currentGame) {
+            console.log(`[Room ${roomCode}] - Bet: $${data.amount}`);
+            const result = currentGame.startNewGame(data.amount);
+            
+            if (result.error) {
+                socket.emit('error', { message: result.error });
+            } else {
+                // Broadcast results to the whole room
+                io.to(roomCode).emit('gameStarted', result);
+            }
         }
     });
 
-    // Handles Gameplay Actions (Hit/Stand)
+    /**
+     * GAMEPLAY: ACTIONS (HIT/STAND)
+     */
     socket.on('playerAction', (data) => {
-        if (data.action === 'hit') {
-            console.log('Player chooses to Hit');
-            const hitResult = game.playerHit();
-            
-            socket.emit('cardDealt', hitResult);
+        const roomCode = Array.from(socket.rooms).find(r => r !== socket.id);
+        const currentGame = gameRooms.get(roomCode);
 
-            // Checks for Bust
+        if (!currentGame) return;
+
+        if (data.action === 'hit') {
+            console.log(`[Room ${roomCode}] - Player Hit`);
+            const hitResult = currentGame.playerHit();
+            
+            // Send the card update to everyone at the table
+            io.to(roomCode).emit('cardDealt', hitResult);
+
             if (hitResult.score > 21) {
-                console.log('Player Busted!');
-                socket.emit('gameOver', { 
+                console.log(`[Room ${roomCode}] - Player Bust`);
+                io.to(roomCode).emit('gameOver', { 
                     reason: 'Bust', 
                     finalScore: hitResult.score,
-                    dealerHand: game.dealerHand
+                    dealerHand: currentGame.dealerHand
                 });
             }
         }
 
         if (data.action === 'stand') {
-            console.log('Player stands. Dealer\'s turn.');
-            // We will add the dealer_ai logic here next!
+            console.log(`[Room ${roomCode}] - Player Stand`);
+            // Add your Dealer AI logic here later
+            // io.to(roomCode).emit('dealerTurn', ...);
         }
     });
 
+    socket.on('disconnecting', () => {
+        const rooms = Array.from(socket.rooms);
+        rooms.forEach(roomCode => {
+            if(roomCode !== socket.id) {
+                const roomSize = (io.sockets.adapter.rooms.get(roomCode)?.size || 1) - 1;
+                io.to(roomCode).emit('playerLeft', { count: roomSize });
+                
+                // Cleanup memory if room is empty
+                if (roomSize === 0) {
+                    gameRooms.delete(roomCode);
+                    console.log(`[Room ${roomCode}] - Session Closed (Empty)`);
+                }
+            }
+        });
+    });
+
     socket.on('disconnect', () => {
-        console.log('Client disconnected');
+        console.log(`<<< Client Disconnected: ${socket.id}`);
     });
 });
 
-const PORT = 3000;
-server.listen(PORT, () => {
-    console.log(`=================================`);
-    console.log(`BLACKJACK BACKEND RUNNING ON PORT ${PORT}`);
-    console.log(`=================================`);
+/**
+ * 4. SERVER START
+ * '0.0.0.0' is required for Cloud Run to route traffic to the container.
+ */
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n=================================`);
+    console.log(`BLACKJACK MULTIPLAYER LIVE`);
+    console.log(`PORT: ${PORT}`);
+    console.log(`ENV:  Production (Cloud Run)`);
+    console.log(`=================================\n`);
 });
