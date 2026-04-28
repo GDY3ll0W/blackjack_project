@@ -172,7 +172,7 @@ class _MultiplayerModeState extends State<MultiplayerMode> {
                     controller: _roomCodeController,
                     style: const TextStyle(color: Colors.white),
                     textAlign: TextAlign.center,
-                    textTransform: TextCapitalization.characters,
+                    textCapitalization: TextCapitalization.characters,
                     decoration: InputDecoration(
                       hintText: 'Enter Room Code',
                       hintStyle: const TextStyle(color: Colors.white54),

@@ -514,7 +514,7 @@ class _GameViewState extends State<GameView> {
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('Exit Game?'),
-            content: const Text(widget.isMultiplayer 
+            content: Text(widget.isMultiplayer 
               ? 'Leaving will disconnect you from the room.' 
               : 'Your progress will be lost.'),
             actions: [
@@ -547,7 +547,7 @@ class _GameViewState extends State<GameView> {
               : const Text('Blackjack - Singleplayer'),
           backgroundColor: Colors.black.withOpacity(0.8),
         ),
-      body: Stack(
+        body: Stack(
         children: [
           // BACKGROUND
           Container(
