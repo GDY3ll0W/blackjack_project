@@ -5,8 +5,16 @@ import '../models/card.dart' as model_card;
 class GameView extends StatefulWidget {
   final String nickname;
   final String avatarPath;
+  final String? roomCode;
+  final bool isMultiplayer;
 
-  const GameView({super.key, required this.nickname, required this.avatarPath});
+  const GameView({
+    super.key,
+    required this.nickname,
+    required this.avatarPath,
+    this.roomCode,
+    this.isMultiplayer = false,
+  });
 
   @override
   _GameViewState createState() => _GameViewState();
@@ -499,11 +507,46 @@ class _GameViewState extends State<GameView> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Blackjack'),
-        backgroundColor: Colors.black.withOpacity(0.8),
-      ),
+    return WillPopScope(
+      onWillPop: () async {
+        // Show confirmation dialog before going back
+        final shouldPop = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Exit Game?'),
+            content: const Text(widget.isMultiplayer 
+              ? 'Leaving will disconnect you from the room.' 
+              : 'Your progress will be lost.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Exit'),
+              ),
+            ],
+          ),
+        );
+        return shouldPop ?? false;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: widget.isMultiplayer
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Blackjack - Multiplayer'),
+                    Text(
+                      'Room: ${widget.roomCode ?? "Unknown"}',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+                    ),
+                  ],
+                )
+              : const Text('Blackjack - Singleplayer'),
+          backgroundColor: Colors.black.withOpacity(0.8),
+        ),
       body: Stack(
         children: [
           // BACKGROUND
@@ -861,6 +904,7 @@ class _GameViewState extends State<GameView> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

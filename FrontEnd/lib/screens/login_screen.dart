@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'avatar_selection_screen.dart';
 
@@ -49,6 +50,10 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _nicknameController,
                 style: const TextStyle(color: Colors.white),
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(15),
+                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
+                ],
                 decoration: const InputDecoration(
                   labelText: 'Enter Nickname',
                   labelStyle: TextStyle(color: Colors.white70),

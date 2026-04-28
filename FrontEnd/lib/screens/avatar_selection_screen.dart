@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'game_view.dart';
+import 'main_menu.dart';
 
 class AvatarSelectionScreen extends StatefulWidget {
   final String nickname;
@@ -68,7 +68,7 @@ class _AvatarSelectionScreenState extends State<AvatarSelectionScreen> {
                       Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => GameView(
+                          builder: (context) => MainMenu(
                             nickname: widget.nickname,
                             avatarPath: selectedAvatar!,
                           ),

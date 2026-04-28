@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart'; 
 import 'screens/login_screen.dart';
-import 'services/socket_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -11,7 +10,8 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  SocketService().connect("testRoom"); // Connect to the backend with a test room code
+  // Socket connection will be initialized based on game mode selection
+  // (singleplayer vs multiplayer)
 
   runApp(const MyApp());
 }
