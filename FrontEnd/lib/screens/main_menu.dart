@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'solo_play.dart';
+import 'game_view.dart';
 import 'multiplayer_mode.dart';
 
 class MainMenu extends StatelessWidget {
@@ -52,9 +52,10 @@ class MainMenu extends StatelessWidget {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => SoloPlay(
+                      builder: (context) => GameView(
                         nickname: nickname,
                         avatarPath: avatarPath,
+                        isMultiplayer: false,
                       ),
                     ),
                   );

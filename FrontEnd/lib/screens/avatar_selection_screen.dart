@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/audio_service.dart';
 import 'main_menu.dart';
 
 class AvatarSelectionScreen extends StatefulWidget {
@@ -12,7 +13,20 @@ class AvatarSelectionScreen extends StatefulWidget {
 
 class _AvatarSelectionScreenState extends State<AvatarSelectionScreen> {
   String? selectedAvatar;
-  final List<String> avatarOptions = ['assets/images/avatar/Octo.png'];
+  final List<String> avatarOptions = [
+    'assets/images/avatar/Octo.png',
+    'assets/images/avatar/Hagfish.png',
+    'assets/images/avatar/Isopod.png',
+    'assets/images/avatar/Lantern.png',
+    'assets/images/avatar/Pig.png',
+    'assets/images/avatar/Rattail.png',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    AudioService.playBackgroundMusic();
+  }
 
   @override
   Widget build(BuildContext context) {

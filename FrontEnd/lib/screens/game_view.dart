@@ -595,13 +595,13 @@ class _GameViewState extends State<GameView> {
 
   ButtonStyle buildButtonStyle(Color backgroundColor, {Color? hoverColor}) {
     return ButtonStyle(
-      backgroundColor: MaterialStateProperty.resolveWith((states) {
-        if (states.contains(MaterialState.pressed)) return backgroundColor.withOpacity(0.75);
-        if (states.contains(MaterialState.hovered)) return hoverColor ?? backgroundColor.withOpacity(0.9);
+      backgroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.pressed)) return backgroundColor.withOpacity(0.75);
+        if (states.contains(WidgetState.hovered)) return hoverColor ?? backgroundColor.withOpacity(0.9);
         return backgroundColor;
       }),
-      padding: MaterialStateProperty.all(const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
-      shape: MaterialStateProperty.all(RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+      padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
+      shape: WidgetStateProperty.all(RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
     );
   }
 
@@ -783,7 +783,9 @@ class _GameViewState extends State<GameView> {
             ),
             alignment: Alignment.center,
             child: Image.asset(
-              "assets/images/table/DeepBlackjack.png",
+              widget.isMultiplayer
+                  ? 'assets/images/table/DeepBlackjack.png'
+                  : 'assets/images/table/DeepBlackjackSolo.png',
               fit: BoxFit.contain,
             ),
           ),

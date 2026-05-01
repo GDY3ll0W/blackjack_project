@@ -63,6 +63,7 @@ flutter:
     - assets/images/avatar/
     - assets/images/dealer/Dealer.png
     - assets/images/table/DeepBlackjack.png
+    - assets/images/table/DeepBlackjackSolo.png
     - assets/audio/
     
 
