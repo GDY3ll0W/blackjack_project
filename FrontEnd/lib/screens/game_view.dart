@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 import '../logic/deck.dart';
 import '../models/card.dart' as model_card;
+import '../services/audio_service.dart';
 
 class GameView extends StatefulWidget {
   final String nickname;
@@ -20,6 +21,8 @@ class GameView extends StatefulWidget {
   _GameViewState createState() => _GameViewState();
 }
 
+enum RoundEffectType { none, win, lose, push }
+
 class _GameViewState extends State<GameView> {
   late Deck deck;
   List<List<model_card.Card>> playerHands = [[]];
@@ -34,10 +37,20 @@ class _GameViewState extends State<GameView> {
   int loanDebt = 0;
   int lastRideAmount = 0;
   int winStreak = 0;
+  int letItRideCounter = 0;
   String gameMessage = 'Place a bet to start';
   bool gameActive = false;
   bool hideDealerHoleCard = true;
   bool hasWon = false;
+  RoundEffectType roundEffect = RoundEffectType.none;
+  bool resultPop = false;
+  int selectedBetAmount = -1;
+  bool selectedAllIn = false;
+  bool selectedCustom = false;
+  int hoveredBetAmount = -1;
+  bool hoveredAllIn = false;
+  bool hoveredCustom = false;
+  bool hoveredClearBet = false;
 
   final List<int> betValues = [5, 10, 20, 25, 50, 100, 150, 200];
   final Map<int, Color> betColors = {
@@ -62,6 +75,7 @@ class _GameViewState extends State<GameView> {
   void initState() {
     super.initState();
     resetGame();
+    AudioService.playBackgroundMusic();
   }
 
   void resetGame() {
@@ -77,11 +91,49 @@ class _GameViewState extends State<GameView> {
     loanDebt = 0;
     lastRideAmount = 0;
     winStreak = 0;
+    letItRideCounter = 0;
     gameMessage = 'Place a bet to start';
     gameActive = false;
     hideDealerHoleCard = true;
     hasWon = false;
+    roundEffect = RoundEffectType.none;
+    resultPop = false;
+    selectedBetAmount = -1;
+    selectedAllIn = false;
+    selectedCustom = false;
+    hoveredBetAmount = -1;
+    hoveredAllIn = false;
+    hoveredCustom = false;
+    hoveredClearBet = false;
     setState(() {});
+  }
+
+  void setRoundEffect(RoundEffectType effect) {
+    roundEffect = effect;
+    resultPop = true;
+    setState(() {});
+
+    Future.delayed(const Duration(milliseconds: 450), () {
+      if (!mounted) return;
+      setState(() => resultPop = false);
+    });
+
+    Future.delayed(const Duration(milliseconds: 900), () {
+      if (!mounted) return;
+      if (roundEffect == effect) {
+        setState(() => roundEffect = RoundEffectType.none);
+      }
+    });
+  }
+
+  void clearSelectedBet() {
+    selectedBetAmount = -1;
+    selectedAllIn = false;
+    selectedCustom = false;
+    hoveredBetAmount = -1;
+    hoveredAllIn = false;
+    hoveredCustom = false;
+    hoveredClearBet = false;
   }
 
   int calculateScore(List<model_card.Card> hand) {
@@ -134,7 +186,7 @@ class _GameViewState extends State<GameView> {
     return balance >= 2 * playerBets[currentHandIndex];
   }
 
-  void placeBet(int amount) {
+  void placeBet(int amount, {bool fromAllIn = false, bool fromCustom = false}) {
     if (gameActive) {
       setState(() => gameMessage = 'Finish the current round first');
       return;
@@ -146,6 +198,10 @@ class _GameViewState extends State<GameView> {
     }
 
     currentBet += amount;
+    selectedBetAmount = fromCustom || fromAllIn ? -1 : amount;
+    selectedAllIn = fromAllIn;
+    selectedCustom = fromCustom;
+
     setState(() => gameMessage = 'Current bet: Ω${formatNumber(currentBet)}');
   }
 
@@ -155,6 +211,7 @@ class _GameViewState extends State<GameView> {
       return;
     }
     currentBet = 0;
+    clearSelectedBet();
     setState(() => gameMessage = 'Bet cleared');
   }
 
@@ -212,7 +269,14 @@ class _GameViewState extends State<GameView> {
       pushes += 1;
       currentBet = 0;
       lastRideAmount = 0;
+      winStreak = 0;
+      clearSelectedBet();
+      roundEffect = RoundEffectType.push;
+      resultPop = true;
       setState(() => gameMessage = '🫧 Both have Blackjack! Push');
+      Future.delayed(const Duration(milliseconds: 900), () {
+        if (mounted) setState(() => roundEffect = RoundEffectType.none);
+      });
       return;
     }
 
@@ -225,9 +289,15 @@ class _GameViewState extends State<GameView> {
       lastRideAmount = playerBets[0];
       final repayment = repayLoanFromWin(playerBets[0]);
       currentBet = 0;
+      clearSelectedBet();
+      roundEffect = RoundEffectType.win;
+      resultPop = true;
       setState(() => gameMessage = repayment > 0
           ? '🃏 BLACKJACK! You win! | \$$repayment loan paid'
           : '🃏 BLACKJACK! You win!');
+      Future.delayed(const Duration(milliseconds: 900), () {
+        if (mounted) setState(() => roundEffect = RoundEffectType.none);
+      });
       return;
     }
 
@@ -239,7 +309,13 @@ class _GameViewState extends State<GameView> {
       winStreak = 0;
       currentBet = 0;
       lastRideAmount = 0;
+      clearSelectedBet();
+      roundEffect = RoundEffectType.lose;
+      resultPop = true;
       setState(() => gameMessage = '💀 Dealer has Blackjack!');
+      Future.delayed(const Duration(milliseconds: 900), () {
+        if (mounted) setState(() => roundEffect = RoundEffectType.none);
+      });
       return;
     }
 
@@ -400,6 +476,7 @@ class _GameViewState extends State<GameView> {
 
     if (hadLoss) {
       winStreak = 0;
+      letItRideCounter = 0;
     } else if (hadWin) {
       winStreak += 1;
     }
@@ -416,11 +493,31 @@ class _GameViewState extends State<GameView> {
     if (balance <= 0) {
       balance = 0;
       lastRideAmount = 0;
+      winStreak = 0;
+      letItRideCounter = 0;
+      AudioService.playHouseEdgeSound();
+      roundEffect = RoundEffectType.lose;
+      resultPop = true;
       setState(() => gameMessage = '💸 You are out of money! Take a loan or press Reset.');
+      Future.delayed(const Duration(milliseconds: 900), () {
+        if (mounted) setState(() => roundEffect = RoundEffectType.none);
+      });
       return;
     }
 
+    if (hadWin) {
+      roundEffect = RoundEffectType.win;
+    } else if (hadLoss) {
+      roundEffect = RoundEffectType.lose;
+    } else {
+      roundEffect = RoundEffectType.push;
+    }
+    resultPop = true;
+
     setState(() => gameMessage = messages.join(' | '));
+    Future.delayed(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => roundEffect = RoundEffectType.none);
+    });
   }
 
   int repayLoanFromWin(int winAmount) {
@@ -448,18 +545,22 @@ class _GameViewState extends State<GameView> {
       return;
     }
 
-    if (lastRideAmount <= 0) {
-      setState(() => gameMessage = 'No winning bet to ride.');
+    if (winStreak <= 0) {
+      setState(() => gameMessage = 'No winning streak to ride.');
       return;
     }
 
-    if (lastRideAmount > balance) {
-      setState(() => gameMessage = 'You do not have enough balance to let it ride.');
+    if (balance <= 0) {
+      setState(() => gameMessage = 'You have no balance to ride.');
       return;
     }
 
-    currentBet = lastRideAmount;
-    setState(() => gameMessage = '🎲 Let It Ride set your next bet to \$${formatNumber(lastRideAmount)}');
+    letItRideCounter += 1;
+    AudioService.playLetItRideSound(letItRideCounter);
+    currentBet = balance;
+    clearSelectedBet();
+    selectedAllIn = true;
+    setState(() => gameMessage = '🎲 Let It Ride! Your bet: Ω${formatNumber(balance)}');
   }
 
   Future<void> customBet() async {
@@ -489,7 +590,129 @@ class _GameViewState extends State<GameView> {
       return;
     }
 
-    placeBet(amount);
+    placeBet(amount, fromCustom: true);
+  }
+
+  ButtonStyle buildButtonStyle(Color backgroundColor, {Color? hoverColor}) {
+    return ButtonStyle(
+      backgroundColor: MaterialStateProperty.resolveWith((states) {
+        if (states.contains(MaterialState.pressed)) return backgroundColor.withOpacity(0.75);
+        if (states.contains(MaterialState.hovered)) return hoverColor ?? backgroundColor.withOpacity(0.9);
+        return backgroundColor;
+      }),
+      padding: MaterialStateProperty.all(const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
+      shape: MaterialStateProperty.all(RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+    );
+  }
+
+  Widget buildBetChip(int value) {
+    final isSelected = selectedBetAmount == value;
+    final isHovered = hoveredBetAmount == value;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => hoveredBetAmount = value),
+      onExit: (_) => setState(() => hoveredBetAmount = -1),
+      child: GestureDetector(
+        onTap: () => placeBet(value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          transform: Matrix4.identity()..scale(isSelected ? 1.08 : isHovered ? 1.05 : 1.0),
+          width: 70,
+          height: 70,
+          decoration: BoxDecoration(
+            color: betColors[value],
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: isSelected ? Colors.amber : Colors.white, width: isSelected ? 3 : 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black54,
+                blurRadius: isSelected ? 12 : 5,
+                offset: const Offset(2, 2),
+              ),
+            ],
+          ),
+          child: Center(
+            child: Text('Ω$value', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget buildBetActionChip({
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+    required bool isSelected,
+    required bool isHovered,
+  }) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) {
+        setState(() {
+          hoveredAllIn = label.contains('RIDE') || label.contains('ALL IN');
+          hoveredCustom = label == 'CUSTOM';
+          hoveredClearBet = label.contains('CLEAR');
+        });
+      },
+      onExit: (_) {
+        setState(() {
+          hoveredAllIn = false;
+          hoveredCustom = false;
+          hoveredClearBet = false;
+        });
+      },
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          transform: Matrix4.identity()..scale(isSelected ? 1.08 : isHovered ? 1.05 : 1.0),
+          width: 70,
+          height: 70,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: isSelected ? Colors.amber : Colors.white, width: isSelected ? 3 : 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black54,
+                blurRadius: isSelected ? 12 : 5,
+                offset: const Offset(2, 2),
+              ),
+            ],
+          ),
+          child: Center(
+            child: Text(label, textAlign: TextAlign.center, style: TextStyle(color: isSelected ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 11, height: 1.2)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color getBackgroundColor() {
+    switch (roundEffect) {
+      case RoundEffectType.win:
+        return const Color(0xFF185D2A);
+      case RoundEffectType.lose:
+        return const Color(0xFF6F2121);
+      case RoundEffectType.push:
+        return const Color(0xFF1B5F5F);
+      case RoundEffectType.none:
+        return const Color(0xFF4A6F3C);
+    }
+  }
+
+  List<BoxShadow> getBackgroundShadow() {
+    switch (roundEffect) {
+      case RoundEffectType.win:
+        return [BoxShadow(color: Colors.greenAccent.withOpacity(0.25), blurRadius: 20, spreadRadius: 4)];
+      case RoundEffectType.lose:
+        return [BoxShadow(color: Colors.redAccent.withOpacity(0.28), blurRadius: 20, spreadRadius: 4)];
+      case RoundEffectType.push:
+        return [BoxShadow(color: Colors.cyanAccent.withOpacity(0.24), blurRadius: 20, spreadRadius: 4)];
+      case RoundEffectType.none:
+        return [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 20, spreadRadius: 2)];
+    }
   }
 
   String cardImageUrl(model_card.Card card) {
@@ -550,10 +773,14 @@ class _GameViewState extends State<GameView> {
         body: Stack(
         children: [
           // BACKGROUND
-          Container(
+          AnimatedContainer(
             width: double.infinity,
             height: double.infinity,
-            color: const Color(0xFF4A6F3C),
+            duration: const Duration(milliseconds: 300),
+            decoration: BoxDecoration(
+              color: getBackgroundColor(),
+              boxShadow: getBackgroundShadow(),
+            ),
             alignment: Alignment.center,
             child: Image.asset(
               "assets/images/table/DeepBlackjack.png",
@@ -601,6 +828,21 @@ class _GameViewState extends State<GameView> {
                     const SizedBox(height: 4),
                     Text('Wins: $wins | Losses: $losses | Pushes: $pushes', 
                       style: const TextStyle(color: Colors.lightGreen, fontSize: 18, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
+                    const SizedBox(height: 12),
+                    AnimatedScale(
+                      scale: resultPop ? 1.1 : 1.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Text(
+                        gameMessage,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: roundEffect == RoundEffectType.lose ? Colors.red[200] : roundEffect == RoundEffectType.win ? Colors.yellow[200] : Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          shadows: const [Shadow(blurRadius: 10, color: Colors.black)],
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 16),
                     
                     // DEALER
@@ -697,34 +939,22 @@ class _GameViewState extends State<GameView> {
                             children: [
                               ElevatedButton(
                                 onPressed: hit,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red[700],
-                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                ),
+                                style: buildButtonStyle(Colors.red[700]!, hoverColor: Colors.red[500]),
                                 child: const Text('Hit', style: TextStyle(fontWeight: FontWeight.bold)),
                               ),
                               ElevatedButton(
                                 onPressed: stand,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.blue[700],
-                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                ),
+                                style: buildButtonStyle(Colors.blue[700]!, hoverColor: Colors.blue[500]),
                                 child: const Text('Stand', style: TextStyle(fontWeight: FontWeight.bold)),
                               ),
                               ElevatedButton(
                                 onPressed: canDoubleDown() ? doubleDown : null,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.purple[700],
-                                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
-                                ),
+                                style: buildButtonStyle(Colors.purple[700]!, hoverColor: Colors.purple[500]),
                                 child: const Text('Double Down', style: TextStyle(fontWeight: FontWeight.bold)),
                               ),
                               ElevatedButton(
                                 onPressed: canSplit() ? splitHand : null,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.brown[700],
-                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                ),
+                                style: buildButtonStyle(Colors.brown[700]!, hoverColor: Colors.brown[500]),
                                 child: const Text('Split', style: TextStyle(fontWeight: FontWeight.bold)),
                               ),
                             ],
@@ -737,10 +967,7 @@ class _GameViewState extends State<GameView> {
                     if (!gameActive)
                       ElevatedButton(
                         onPressed: dealRound,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green[800],
-                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                        ),
+                        style: buildButtonStyle(Colors.green[800]!, hoverColor: Colors.green[600]),
                         child: const Text('Start Round', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                       ),
                     
@@ -756,24 +983,7 @@ class _GameViewState extends State<GameView> {
                             alignment: WrapAlignment.center,
                             spacing: 10,
                             runSpacing: 10,
-                            children: betValues.map((value) {
-                              return GestureDetector(
-                                onTap: () => placeBet(value),
-                                child: Container(
-                                  width: 70,
-                                  height: 70,
-                                  decoration: BoxDecoration(
-                                    color: betColors[value],
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: Colors.white, width: 2),
-                                    boxShadow: const [BoxShadow(blurRadius: 5, color: Colors.black54, offset: Offset(2, 2))],
-                                  ),
-                                  child: Center(
-                                    child: Text('Ω$value', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
+                            children: betValues.map(buildBetChip).toList(),
                           ),
                           const SizedBox(height: 10),
                           // CLEAR BET, ALL IN / LET IT RIDE & CUSTOM
@@ -782,67 +992,41 @@ class _GameViewState extends State<GameView> {
                             spacing: 10,
                             runSpacing: 10,
                             children: [
-                              GestureDetector(
+                              buildBetActionChip(
+                                label: 'CLEAR\nBET',
+                                color: Colors.blue[900]!,
                                 onTap: clearBet,
-                                child: Container(
-                                  width: 70,
-                                  height: 70,
-                                  decoration: BoxDecoration(
-                                    color: Colors.blue[900],
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: Colors.white, width: 2),
-                                    boxShadow: const [BoxShadow(blurRadius: 5, color: Colors.black54, offset: Offset(2, 2))],
-                                  ),
-                                  child: const Center(
-                                    child: Text('CLEAR\nBET', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11, height: 1.2)),
-                                  ),
-                                ),
+                                isSelected: false,
+                                isHovered: hoveredClearBet,
                               ),
-                              // ALL IN button that changes to LET IT RIDE on win streak
-                              GestureDetector(
+                              buildBetActionChip(
+                                label: winStreak > 0 && balance > 0 ? 'LET IT\nRIDE' : 'ALL IN',
+                                color: winStreak > 0 && balance > 0 ? Colors.amber[600]! : Colors.red[900]!,
                                 onTap: () {
                                   if (gameActive) {
                                     setState(() => gameMessage = 'Finish the current round first');
                                     return;
                                   }
-                                  currentBet = balance;
-                                  setState(() => gameMessage = 'Current bet: Ω${formatNumber(currentBet)}');
+
+                                  if (winStreak > 0 && balance > 0) {
+                                    letItRide();
+                                  } else {
+                                    currentBet = balance;
+                                    selectedBetAmount = -1;
+                                    selectedAllIn = true;
+                                    selectedCustom = false;
+                                    setState(() => gameMessage = 'Current bet: Ω${formatNumber(currentBet)}');
+                                  }
                                 },
-                                child: Container(
-                                  width: 70,
-                                  height: 70,
-                                  decoration: BoxDecoration(
-                                    color: winStreak > 0 && lastRideAmount > 0 && balance >= lastRideAmount ? Colors.amber[600] : Colors.red[900],
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: Colors.white, width: 2),
-                                    boxShadow: winStreak > 0 && lastRideAmount > 0 && balance >= lastRideAmount
-                                      ? [BoxShadow(color: Colors.amber, blurRadius: 8)]
-                                      : const [BoxShadow(blurRadius: 5, color: Colors.black54, offset: Offset(2, 2))],
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      winStreak > 0 && lastRideAmount > 0 && balance >= lastRideAmount ? 'LET IT\nRIDE' : 'ALL IN',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(color: winStreak > 0 && lastRideAmount > 0 && balance >= lastRideAmount ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 11, height: 1.2),
-                                    ),
-                                  ),
-                                ),
+                                isSelected: selectedAllIn,
+                                isHovered: hoveredAllIn,
                               ),
-                              GestureDetector(
+                              buildBetActionChip(
+                                label: 'CUSTOM',
+                                color: Colors.cyan[900]!,
                                 onTap: () => customBet(),
-                                child: Container(
-                                  width: 70,
-                                  height: 70,
-                                  decoration: BoxDecoration(
-                                    color: Colors.cyan[900],
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: Colors.white, width: 2),
-                                    boxShadow: const [BoxShadow(blurRadius: 5, color: Colors.black54, offset: Offset(2, 2))],
-                                  ),
-                                  child: const Center(
-                                    child: Text('CUSTOM', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
-                                  ),
-                                ),
+                                isSelected: selectedCustom,
+                                isHovered: hoveredCustom,
                               ),
                             ],
                           ),
