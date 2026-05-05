@@ -208,7 +208,6 @@ class GameState {
 
         this.gameStatus = 'playing';
         this.currentTurnPlayerId = this.playerOrder.find(id => this.players.get(id)?.status === 'playing') || null; //[cite: 1]
-        this.startTurnTimer();
 
         return {
             dealerHand: [this.dealerHand[0], { rank: 'Hidden', suit: 'Hidden' }],
@@ -246,7 +245,6 @@ class GameState {
             const player = this.players.get(nextPlayerId);
             if (player && player.status === 'playing') {
                 this.currentTurnPlayerId = nextPlayerId;
-                this.startTurnTimer();
                 return null;
             }
             nextIndex = (nextIndex + 1) % this.playerOrder.length;
