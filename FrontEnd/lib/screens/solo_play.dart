@@ -406,7 +406,7 @@ class _SoloPlayState extends State<SoloPlay> {
     if (balance <= 0) {
       balance = 0;
       lastRideAmount = 0;
-      setState(() => gameMessage = '💸 You are out of money! Take a loan or press Reset.');
+      setState(() => gameMessage = '💸 You are out of money! Take a loan to continue.');
       return;
     }
 
@@ -450,36 +450,6 @@ class _SoloPlayState extends State<SoloPlay> {
 
     currentBet = lastRideAmount;
     setState(() => gameMessage = '🎲 Let It Ride set your next bet to \$${formatNumber(lastRideAmount)}');
-  }
-
-  Future<void> customBet() async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Custom Bet'),
-          content: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(hintText: 'Enter bet amount'),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(null), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.of(context).pop(controller.text), child: const Text('OK')),
-          ],
-        );
-      },
-    );
-
-    if (result == null) return;
-    final amount = int.tryParse(result);
-    if (amount == null || amount <= 0 || amount > balance) {
-      setState(() => gameMessage = 'Invalid amount!');
-      return;
-    }
-
-    placeBet(amount);
   }
 
   String cardImageUrl(model_card.Card card) {
@@ -723,11 +693,6 @@ class _SoloPlayState extends State<SoloPlay> {
                         child: const Text('Deal'),
                       ),
                       ElevatedButton(
-                        onPressed: resetGame,
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[700]),
-                        child: const Text('Reset'),
-                      ),
-                      ElevatedButton(
                         onPressed: letItRide,
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.teal[700]),
                         child: const Text('Let It Ride'),
@@ -759,11 +724,6 @@ class _SoloPlayState extends State<SoloPlay> {
                         onPressed: !gameActive && currentBet > 0 ? clearBet : null,
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.red[900]),
                         child: const Text('Clear Bet'),
-                      ),
-                      ElevatedButton(
-                        onPressed: customBet,
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo[700]),
-                        child: const Text('Custom Bet'),
                       ),
                       ElevatedButton(
                         onPressed: () => takeLoan(100),

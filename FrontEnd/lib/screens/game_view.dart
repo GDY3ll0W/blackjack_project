@@ -4,6 +4,7 @@ import '../logic/deck.dart';
 import '../models/card.dart' as model_card;
 import '../services/audio_service.dart';
 import '../services/socket_service.dart';
+import '../widgets/playing_card_widget.dart';
 
 class GameView extends StatefulWidget {
   final String nickname;
@@ -24,7 +25,7 @@ class GameView extends StatefulWidget {
   });
 
   @override
-  _GameViewState createState() => _GameViewState();
+  State<GameView> createState() => _GameViewState();
 }
 
 enum RoundEffectType { none, win, lose, push }
@@ -53,10 +54,8 @@ class _GameViewState extends State<GameView> {
   bool resultPop = false;
   int selectedBetAmount = -1;
   bool selectedAllIn = false;
-  bool selectedCustom = false;
   int hoveredBetAmount = -1;
   bool hoveredAllIn = false;
-  bool hoveredCustom = false;
   bool hoveredClearBet = false;
 
   // Multiplayer state
@@ -68,6 +67,9 @@ class _GameViewState extends State<GameView> {
   Timer? turnTimer;
   int timeLeft = 30;
   bool isMyTurn = false;
+  int roundNumber = 1;
+  bool showRoundStartedPopup = false;
+  bool showRoundEndedPopup = false;
 
   final List<int> betValues = [5, 10, 20, 25, 50, 100, 150, 200];
   final Map<int, Color> betColors = {
@@ -116,6 +118,18 @@ class _GameViewState extends State<GameView> {
         players = List<Map<String, dynamic>>.from(data['players']);
         gameStatus = data['gameStatus'];
         currentTurnPlayerId = data['currentTurnPlayerId'];
+
+        final me = players.firstWhere((p) => p['id'] == currentPlayerId, orElse: () => {});
+        if (me.isNotEmpty) {
+          amIReady = me['isReady'] ?? false;
+          balance = (me['balance'] ?? balance).toInt();
+          loanDebt = (me['loanDebt'] ?? loanDebt).toInt();
+          wins = (me['wins'] ?? wins).toInt();
+          losses = (me['losses'] ?? losses).toInt();
+          pushes = (me['pushes'] ?? pushes).toInt();
+          currentBet = (me['bet'] ?? 0).toInt();
+        }
+
         updateMyTurn();
       });
     }
@@ -133,8 +147,12 @@ class _GameViewState extends State<GameView> {
         final me = players.firstWhere((p) => p['id'] == currentPlayerId, orElse: () => {});
         if (me.isNotEmpty) {
           amIReady = me['isReady'] ?? false;
-          // Sync balance to ensure UI matches server database
           balance = (me['balance'] ?? balance).toInt();
+          loanDebt = (me['loanDebt'] ?? loanDebt).toInt();
+          wins = (me['wins'] ?? wins).toInt();
+          losses = (me['losses'] ?? losses).toInt();
+          pushes = (me['pushes'] ?? pushes).toInt();
+          currentBet = (me['bet'] ?? 0).toInt();
         }
 
         updateMyTurn();
@@ -154,29 +172,40 @@ class _GameViewState extends State<GameView> {
         dealerHand = List<model_card.Card>.from(
           data['dealerHand'].map((card) => model_card.Card.fromJson(card))
         );
-        hideDealerHoleCard = true; 
+        hideDealerHoleCard = true;
 
         // 2. Sync Game State
         currentTurnPlayerId = data['currentTurnPlayerId'];
-        gameStatus = data['status'];
+        gameStatus = data['status']?.toString() ?? gameStatus;
         gameActive = true;
+        players = List<Map<String, dynamic>>.from(data['players']);
+        roundNumber = data['roundNumber'] ?? roundNumber;
 
-        // 3. Sync all players' hands (Crucial for seeing partners)
-        final playersData = data['players'];
-        for (final playerData in playersData) {
-          if (playerData['id'] == currentPlayerId) {
-            playerHands = [
-              List<model_card.Card>.from(playerData['hand'].map((card) => model_card.Card.fromJson(card)))
-            ];
-            playerBets = [(playerData['bet'] ?? 0).toInt()];
-            balance = (playerData['balance'] ?? balance).toInt();
-          }
+        // 3. Sync your own hand, bet and stats
+        final me = players.firstWhere((p) => p['id'] == currentPlayerId, orElse: () => {});
+        if (me.isNotEmpty) {
+          playerHands = [
+            List<model_card.Card>.from(me['hand'].map((card) => model_card.Card.fromJson(card)))
+          ];
+          playerBets = [(me['bet'] ?? 0).toInt()];
+          currentBet = (me['bet'] ?? 0).toInt();
+          balance = (me['balance'] ?? balance).toInt();
+          loanDebt = (me['loanDebt'] ?? loanDebt).toInt();
+          wins = (me['wins'] ?? wins).toInt();
+          losses = (me['losses'] ?? losses).toInt();
+          pushes = (me['pushes'] ?? pushes).toInt();
         }
-        
+
         updateMyTurn();
-        gameMessage = isMyTurn ? "Your turn!" : "Round Started - Waiting...";
+        gameMessage = isMyTurn ? 'Your turn!' : 'Round Started - Waiting...';
+        showRoundStartedPopup = true;
       });
-      AudioService.playDealSound();
+      // Hide popup after 2 seconds
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          setState(() => showRoundStartedPopup = false);
+        }
+      });
     }
   };
 
@@ -190,7 +219,17 @@ class _GameViewState extends State<GameView> {
           }
         }
         // Update message to show what happened at the table
-        gameMessage = 'Player ${data['slot'] ?? data['playerId']} ${data['action']}s';
+        String actionMsg;
+        if (data['action'] == 'bust') {
+          final card = model_card.Card.fromJson(data['card']);
+          actionMsg = 'Player ${data['slot'] ?? data['playerId']} got ${card.rank} of ${card.suit} - BUST! (Score: ${data['score']})';
+        } else if (data['action'] == 'hit' && data['card'] != null) {
+          final card = model_card.Card.fromJson(data['card']);
+          actionMsg = 'Player ${data['slot'] ?? data['playerId']} hits - Got ${card.rank} of ${card.suit}';
+        } else {
+          actionMsg = 'Player ${data['slot'] ?? data['playerId']} ${data['action']}s';
+        }
+        gameMessage = actionMsg;
       });
     }
   };
@@ -198,18 +237,17 @@ class _GameViewState extends State<GameView> {
   socketService.onRoundEnd = (data) {
     if (mounted) {
       setState(() {
-        // 1. Reveal Dealer's Hand
         dealerHand = List<model_card.Card>.from(
           data['dealerHand'].map((card) => model_card.Card.fromJson(card))
         );
         hideDealerHoleCard = false;
-        
-        // 2. Process Results
+        currentTurnPlayerId = null;
+        gameStatus = data['status']?.toString() ?? gameStatus;
+
         for (final result in data['results']) {
           if (result['playerId'] == currentPlayerId) {
-            balance = (result['newBalance'] ?? balance).toInt();
-            
-            // Trigger your existing visual effects
+            balance = (result['balance'] ?? balance).toInt();
+
             if (result['result'] == 'win') {
               setRoundEffect(RoundEffectType.win);
               wins++;
@@ -222,10 +260,20 @@ class _GameViewState extends State<GameView> {
             }
           }
         }
-        
+
         gameActive = false;
-        gameStatus = 'LOBBY';
-        gameMessage = 'Round ended!';
+        currentBet = 0;
+        playerBets = [0];
+        clearSelectedBet();
+        gameMessage = 'Round ended! To start next round, place a bet.';
+        showRoundEndedPopup = true;
+        roundNumber++;
+      });
+      // Hide popup after 2 seconds
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          setState(() => showRoundEndedPopup = false);
+        }
       });
     }
   };
@@ -235,7 +283,32 @@ class _GameViewState extends State<GameView> {
       setState(() {
         if (data['playerId'] == currentPlayerId) {
           balance = (data['balance'] ?? balance).toInt();
+          currentBet = (data['amount'] ?? currentBet).toInt();
           gameMessage = 'Bet confirmed: Ω${data['amount']}';
+        }
+      });
+    }
+  };
+
+  socketService.onLoanTaken = (data) {
+    if (mounted) {
+      setState(() {
+        if (data['playerId'] == currentPlayerId) {
+          balance = (data['balance'] ?? balance).toInt();
+          loanDebt = (data['loanDebt'] ?? loanDebt).toInt();
+          gameMessage = 'Loan approved: Ω${data['balance']} available';
+        }
+      });
+    }
+  };
+
+  socketService.onBetCancelled = (data) {
+    if (mounted) {
+      setState(() {
+        if (data['playerId'] == currentPlayerId) {
+          currentBet = 0;
+          clearSelectedBet();
+          gameMessage = 'Bet cancelled. Choose another amount.';
         }
       });
     }
@@ -288,7 +361,31 @@ void startTurnTimer() {
   });
 }
 
-    // Single player logic
+  void placeBet(int amount, {bool fromCustom = false, bool fromAllIn = false}) {
+    if (widget.isMultiplayer) {
+      if (gameStatus != 'betting') {
+        setState(() => gameMessage = 'Betting phase is not active');
+        return;
+      }
+      if (currentBet > 0) {
+        setState(() => gameMessage = 'Clear your current bet before choosing another amount');
+        return;
+      }
+      if (amount <= 0 || amount > balance) {
+        setState(() => gameMessage = 'Invalid bet amount');
+        return;
+      }
+
+      socketService.placeBet(widget.roomCode ?? '', amount.toDouble());
+      setState(() {
+        currentBet = amount;
+        selectedBetAmount = fromCustom || fromAllIn ? -1 : amount;
+        selectedAllIn = fromAllIn;
+        gameMessage = 'Placing bet...';
+      });
+      return;
+    }
+
     if (gameActive) {
       setState(() => gameMessage = 'Finish the current round first');
       return;
@@ -302,12 +399,32 @@ void startTurnTimer() {
     currentBet += amount;
     selectedBetAmount = fromCustom || fromAllIn ? -1 : amount;
     selectedAllIn = fromAllIn;
-    selectedCustom = fromCustom;
 
     setState(() => gameMessage = 'Current bet: Ω${formatNumber(currentBet)}');
   }
 
+  void clearSelectedBet() {
+    selectedBetAmount = -1;
+    selectedAllIn = false;
+  }
+
   void clearBet() {
+    if (widget.isMultiplayer) {
+      if (gameStatus != 'betting') {
+        setState(() => gameMessage = 'You can only clear bets during betting');
+        return;
+      }
+      if (currentBet <= 0) {
+        setState(() => gameMessage = 'No bet to clear');
+        return;
+      }
+      socketService.cancelBet(widget.roomCode ?? '');
+      currentBet = 0;
+      clearSelectedBet();
+      setState(() => gameMessage = 'Bet cancelled. Choose a new amount.');
+      return;
+    }
+
     if (gameActive) {
       setState(() => gameMessage = 'Finish the current round first');
       return;
@@ -315,6 +432,94 @@ void startTurnTimer() {
     currentBet = 0;
     clearSelectedBet();
     setState(() => gameMessage = 'Bet cleared');
+  }
+
+  void resetGame() {
+    deck = Deck(numDecks: 6);
+    playerHands = [[]];
+    playerBets = [0];
+    dealerHand = [];
+    currentHandIndex = 0;
+    currentBet = 0;
+    wins = 0;
+    losses = 0;
+    pushes = 0;
+    loanDebt = 0;
+    lastRideAmount = 0;
+    winStreak = 0;
+    letItRideCounter = 0;
+    gameMessage = 'Place a bet to start';
+    gameActive = false;
+    hideDealerHoleCard = true;
+    roundEffect = RoundEffectType.none;
+    resultPop = false;
+    clearSelectedBet();
+  }
+
+  int calculateScore(List<model_card.Card> hand) {
+    int total = 0;
+    int aces = 0;
+
+    for (final card in hand) {
+      if (card.rank == 'Ace') {
+        total += 11;
+        aces += 1;
+      } else if (['Jack', 'Queen', 'King'].contains(card.rank)) {
+        total += 10;
+      } else {
+        total += int.parse(card.rank);
+      }
+    }
+
+    while (total > 21 && aces > 0) {
+      total -= 10;
+      aces -= 1;
+    }
+
+    return total;
+  }
+
+  String handText(List<model_card.Card> hand) {
+    if (hand.isEmpty) return '';
+    final cardNames = hand.map((card) => card.rank).join(' + ');
+    return '$cardNames = ${calculateScore(hand)}';
+  }
+
+  bool sameValue(model_card.Card? cardA, model_card.Card? cardB) {
+    if (cardA == null || cardB == null) return false;
+    return cardA.rank == cardB.rank;
+  }
+
+  bool canSplit() {
+    if (!gameActive) return false;
+    if (playerHands.length != 1) return false;
+    final hand = playerHands[0];
+    if (hand.length != 2) return false;
+    if (!sameValue(hand[0], hand[1])) return false;
+    return balance >= playerBets[0];
+  }
+
+  bool canDoubleDown() {
+    if (!gameActive) return false;
+    final hand = playerHands[currentHandIndex];
+    if (hand.length != 2) return false;
+    return balance >= 2 * playerBets[currentHandIndex];
+  }
+
+  void setRoundEffect(RoundEffectType effect) {
+    roundEffect = effect;
+    resultPop = true;
+    if (mounted) {
+      setState(() {});
+    }
+    Future.delayed(const Duration(milliseconds: 900), () {
+      if (mounted) {
+        setState(() {
+          roundEffect = RoundEffectType.none;
+          resultPop = false;
+        });
+      }
+    });
   }
 
   void createNewDeckIfNeeded() {
@@ -436,7 +641,7 @@ void startTurnTimer() {
         setState(() => gameMessage = 'Not your turn');
         return;
       }
-      socketService.playAction('hit');
+      socketService.playAction(widget.roomCode ?? '', 'hit');
       return;
     }
 
@@ -468,7 +673,7 @@ void startTurnTimer() {
         setState(() => gameMessage = 'Not your turn');
         return;
       }
-      socketService.playAction('stand');
+      socketService.playAction(widget.roomCode ?? '', 'stand');
       return;
     }
 
@@ -482,6 +687,19 @@ void startTurnTimer() {
   }
 
   void doubleDown() {
+    if (widget.isMultiplayer) {
+      if (!isMyTurn || gameStatus != 'playing') {
+        setState(() => gameMessage = 'Not your turn');
+        return;
+      }
+      if (!canDoubleDown()) {
+        setState(() => gameMessage = 'Cannot double down now');
+        return;
+      }
+      socketService.playAction(widget.roomCode ?? '', 'double_down');
+      return;
+    }
+
     if (!canDoubleDown()) {
       setState(() => gameMessage = 'You can only double down on a hand with exactly 2 cards, and you need enough balance.');
       return;
@@ -623,10 +841,9 @@ void startTurnTimer() {
       lastRideAmount = 0;
       winStreak = 0;
       letItRideCounter = 0;
-      AudioService.playHouseEdgeSound();
       roundEffect = RoundEffectType.lose;
       resultPop = true;
-      setState(() => gameMessage = '💸 You are out of money! Take a loan or press Reset.');
+      setState(() => gameMessage = '💸 You are out of money! Take a loan to continue.');
       Future.delayed(const Duration(milliseconds: 900), () {
         if (mounted) setState(() => roundEffect = RoundEffectType.none);
       });
@@ -661,14 +878,18 @@ void startTurnTimer() {
   }
 
   void takeLoan(int amount) {
+    if (amount <= 0) return;
     if (widget.isMultiplayer) {
-      socketService.takeLoan(amount);
-    } else {
-      if (amount <= 0) return;
-      balance += amount;
-      loanDebt += amount;
-      setState(() => gameMessage = '💵 You took out a \$${formatNumber(amount)} loan. Future winnings will repay it.');
+      if (gameStatus != 'betting') {
+        setState(() => gameMessage = 'Loans are only available during betting phase.');
+        return;
+      }
+      socketService.takeLoan(widget.roomCode ?? '', amount);
+      return;
     }
+    balance += amount;
+    loanDebt += amount;
+    setState(() => gameMessage = '💵 You took out a \$${formatNumber(amount)} loan. Future winnings will repay it.');
   }
 
   void letItRide() {
@@ -688,53 +909,17 @@ void startTurnTimer() {
     }
 
     letItRideCounter += 1;
-    AudioService.playLetItRideSound(letItRideCounter);
     currentBet = balance;
     clearSelectedBet();
     selectedAllIn = true;
     setState(() => gameMessage = '🎲 Let It Ride! Your bet: Ω${formatNumber(balance)}');
   }
 
-  Future<void> customBet() async {
-    if (widget.isMultiplayer && (!isMyTurn || gameStatus != 'betting')) {
-      setState(() => gameMessage = 'Not your turn to place a bet');
-      return;
-    }
-
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Custom Bet'),
-          content: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(hintText: 'Enter bet amount'),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(null), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.of(context).pop(controller.text), child: const Text('OK')),
-          ],
-        );
-      },
-    );
-
-    if (result == null) return;
-    final amount = int.tryParse(result);
-    if (amount == null || amount <= 0 || amount > balance) {
-      setState(() => gameMessage = 'Invalid amount!');
-      return;
-    }
-
-    placeBet(amount, fromCustom: true);
-  }
-
   ButtonStyle buildButtonStyle(Color backgroundColor, {Color? hoverColor}) {
     return ButtonStyle(
       backgroundColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.pressed)) return backgroundColor.withOpacity(0.75);
-        if (states.contains(WidgetState.hovered)) return hoverColor ?? backgroundColor.withOpacity(0.9);
+        if (states.contains(WidgetState.pressed)) return backgroundColor.withValues(alpha: 0.75);
+        if (states.contains(WidgetState.hovered)) return hoverColor ?? backgroundColor.withValues(alpha: 0.9);
         return backgroundColor;
       }),
       padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
@@ -788,14 +973,12 @@ void startTurnTimer() {
       onEnter: (_) {
         setState(() {
           hoveredAllIn = label.contains('RIDE') || label.contains('ALL IN');
-          hoveredCustom = label == 'CUSTOM';
           hoveredClearBet = label.contains('CLEAR');
         });
       },
       onExit: (_) {
         setState(() {
           hoveredAllIn = false;
-          hoveredCustom = false;
           hoveredClearBet = false;
         });
       },
@@ -842,13 +1025,13 @@ void startTurnTimer() {
   List<BoxShadow> getBackgroundShadow() {
     switch (roundEffect) {
       case RoundEffectType.win:
-        return [BoxShadow(color: Colors.greenAccent.withOpacity(0.25), blurRadius: 20, spreadRadius: 4)];
+        return [BoxShadow(color: Colors.greenAccent.withValues(alpha: 0.25), blurRadius: 20, spreadRadius: 4)];
       case RoundEffectType.lose:
-        return [BoxShadow(color: Colors.redAccent.withOpacity(0.28), blurRadius: 20, spreadRadius: 4)];
+        return [BoxShadow(color: Colors.redAccent.withValues(alpha: 0.28), blurRadius: 20, spreadRadius: 4)];
       case RoundEffectType.push:
-        return [BoxShadow(color: Colors.cyanAccent.withOpacity(0.24), blurRadius: 20, spreadRadius: 4)];
+        return [BoxShadow(color: Colors.cyanAccent.withValues(alpha: 0.24), blurRadius: 20, spreadRadius: 4)];
       case RoundEffectType.none:
-        return [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 20, spreadRadius: 2)];
+        return [BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 20, spreadRadius: 2)];
     }
   }
 
@@ -910,7 +1093,7 @@ void startTurnTimer() {
                   ],
                 )
               : const Text('Blackjack - Singleplayer'),
-          backgroundColor: Colors.black.withOpacity(0.8),
+          backgroundColor: Colors.black.withValues(alpha: 0.8),
         ),
         body: Stack(
         children: [
@@ -941,7 +1124,7 @@ void startTurnTimer() {
                 width: 200,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.8),
+                  color: Colors.black.withValues(alpha: 0.8),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: Colors.amber, width: 2),
                 ),
@@ -965,10 +1148,10 @@ void startTurnTimer() {
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: isCurrentTurn 
-                              ? Colors.amber.withOpacity(0.3)
+                              ? Colors.amber.withValues(alpha: 0.3)
                               : isCurrentPlayer 
-                                  ? Colors.blue.withOpacity(0.3)
-                                  : Colors.white.withOpacity(0.1),
+                                  ? Colors.blue.withValues(alpha: 0.3)
+                                  : Colors.white.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Row(
@@ -1015,7 +1198,7 @@ void startTurnTimer() {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.8),
+                  color: Colors.black.withValues(alpha: 0.8),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: Colors.amber, width: 2),
                 ),
@@ -1029,11 +1212,34 @@ void startTurnTimer() {
                 ),
               ),
             ),
-          
-          // PLAYER AVATAR (Left side)
+
+          // ROUND NUMBER (Middle Left) - Only in multiplayer
+          if (widget.isMultiplayer)
+            Positioned(
+              left: 20,
+              top: MediaQuery.of(context).size.height / 2 - 50,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber, width: 2),
+                ),
+                child: Text(
+                  'Round $roundNumber',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+
+          // PLAYER AVATAR (Top left)
           Positioned(
-            left: 135,
-            top: 374,
+            left: 16,
+            top: 16,
             child: Container(
               width: 90,
               height: 90,
@@ -1062,17 +1268,14 @@ void startTurnTimer() {
                     Text('Balance: Ω${formatNumber(balance)}', 
                       style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
                     const SizedBox(height: 4),
-                    if (!widget.isMultiplayer)
-                      Text('Current Bet: Ω${formatNumber(currentBet)}', 
-                        style: const TextStyle(color: Colors.white, fontSize: 20, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
-                    if (!widget.isMultiplayer) ...[
-                      const SizedBox(height: 4),
-                      Text('Loan Debt: Ω${formatNumber(loanDebt)}', 
-                        style: const TextStyle(color: Colors.orange, fontSize: 20, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
-                      const SizedBox(height: 4),
-                      Text('Wins: $wins | Losses: $losses | Pushes: $pushes', 
-                        style: const TextStyle(color: Colors.lightGreen, fontSize: 18, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
-                    ],
+                    Text('Current Bet: Ω${formatNumber(currentBet)}', 
+                      style: const TextStyle(color: Colors.white, fontSize: 20, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
+                    const SizedBox(height: 4),
+                    Text('Loan Debt: Ω${formatNumber(loanDebt)}', 
+                      style: TextStyle(color: loanDebt > 0 ? Colors.orange : Colors.green, fontSize: 20, fontWeight: FontWeight.bold, shadows: const [Shadow(blurRadius: 10, color: Colors.black)])),
+                    const SizedBox(height: 4),
+                    Text('Wins: $wins | Losses: $losses | Pushes: $pushes', 
+                      style: const TextStyle(color: Colors.lightGreen, fontSize: 18, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
                     const SizedBox(height: 12),
                     AnimatedScale(
                       scale: resultPop ? 1.1 : 1.0,
@@ -1211,11 +1414,31 @@ void startTurnTimer() {
                       ),
                     
                     // BET CHIPS - Only show in single player or multiplayer betting phase
-                    if ((!widget.isMultiplayer && !gameActive) || (widget.isMultiplayer && isMyTurn && gameStatus == 'betting'))
+                    if ((!widget.isMultiplayer && !gameActive) || (widget.isMultiplayer && gameStatus == 'betting'))
                       Column(
                         children: [
                           const Text('Bet Options', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 12),
+                          if (widget.isMultiplayer)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              margin: const EdgeInsets.only(bottom: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.red[900]!.withValues(alpha: 0.8),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.red, width: 2),
+                              ),
+                              child: const Text(
+                                'ALL BETS ARE FINAL ONCE CLICKED - BE WISE!!!!!',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1.2,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
                           Wrap(
                             alignment: WrapAlignment.center,
                             spacing: 10,
@@ -1229,44 +1452,37 @@ void startTurnTimer() {
                             spacing: 10,
                             runSpacing: 10,
                             children: [
-                              buildBetActionChip(
-                                label: 'CLEAR\nBET',
-                                color: Colors.blue[900]!,
-                                onTap: clearBet,
-                                isSelected: false,
-                                isHovered: hoveredClearBet,
-                              ),
+                              if (!widget.isMultiplayer)
+                                buildBetActionChip(
+                                  label: 'CLEAR\nBET',
+                                  color: Colors.blue[900]!,
+                                  onTap: clearBet,
+                                  isSelected: false,
+                                  isHovered: hoveredClearBet,
+                                ),
                               buildBetActionChip(
                                 label: !widget.isMultiplayer && winStreak > 0 ? 'LET IT\nRIDE' : 'ALL IN',
                                 color: Colors.red[900]!,
                                 onTap: () {
                                   if (widget.isMultiplayer) {
-                                    if (!isMyTurn || gameStatus != 'betting') {
-                                      setState(() => gameMessage = 'Not your turn to bet');
+                                    if (gameStatus != 'betting') {
+                                      setState(() => gameMessage = 'Betting phase is not active');
                                       return;
                                     }
                                     placeBet(balance);
-                                  } else {
-                                    if (winStreak > 0) {
-                                      letItRide();
-                                      return;
-                                    }
-                                    currentBet = balance;
-                                    selectedBetAmount = -1;
-                                    selectedAllIn = true;
-                                    selectedCustom = false;
-                                    setState(() => gameMessage = 'Current bet: Ω${formatNumber(currentBet)}');
+                                    return;
                                   }
+                                  if (winStreak > 0) {
+                                    letItRide();
+                                    return;
+                                  }
+                                  currentBet = balance;
+                                  selectedBetAmount = -1;
+                                  selectedAllIn = true;
+                                  setState(() => gameMessage = 'Current bet: Ω${formatNumber(currentBet)}');
                                 },
                                 isSelected: selectedAllIn,
                                 isHovered: hoveredAllIn,
-                              ),
-                              buildBetActionChip(
-                                label: 'CUSTOM',
-                                color: Colors.cyan[900]!,
-                                onTap: () => customBet(),
-                                isSelected: selectedCustom,
-                                isHovered: hoveredCustom,
                               ),
                             ],
                           ),
@@ -1282,8 +1498,8 @@ void startTurnTimer() {
                         ],
                       ),
                     
-                    // LOAN OPTIONS (only when balance is 0)
-                    if (balance == 0)
+                    // LOAN OPTIONS (only when balance is 0 and no active bet)
+                    if (balance == 0 && currentBet == 0)
                       Column(
                         children: [
                           const Text('Loan Options', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
@@ -1323,12 +1539,6 @@ void startTurnTimer() {
                         ],
                       ),
                     
-                    // RESET BUTTON
-                    TextButton(
-                      onPressed: resetGame,
-                      style: TextButton.styleFrom(foregroundColor: Colors.white70),
-                      child: const Text('Reset Table', style: TextStyle(fontSize: 14, decoration: TextDecoration.underline)),
-                    ),
                     const SizedBox(height: 24),
                   ],
                 ),
@@ -1342,11 +1552,12 @@ void startTurnTimer() {
       ),
     );
   }
-Widget _buildLobbyOverlay() {
+
+  Widget _buildLobbyOverlay() {
     return Container(
       width: double.infinity,
       height: double.infinity,
-      color: Colors.black.withOpacity(0.85),
+      color: Colors.black.withValues(alpha: 0.85),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -1388,6 +1599,8 @@ Widget _buildLobbyOverlay() {
       ),
     );
   }
+
+
   
   @override
   void dispose() {
@@ -1396,54 +1609,5 @@ Widget _buildLobbyOverlay() {
       socketService.disconnect();
     }
     super.dispose();
-  }
-}
-
-class PlayingCardWidget extends StatelessWidget {
-  final String imageUrl;
-  final String? rank;
-  final String? suit;
-  final bool hidden;
-
-  const PlayingCardWidget({
-    super.key,
-    required this.imageUrl,
-    this.rank,
-    this.suit,
-    this.hidden = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 70,
-      height: 100,
-      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 6, offset: const Offset(2, 4))],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.network(
-          imageUrl,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return Container(
-              color: hidden ? Colors.blue[900] : Colors.white,
-              alignment: Alignment.center,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (!hidden) Text(rank ?? '', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
-                  if (!hidden) Text(suit != null ? suit![0] : '', style: const TextStyle(color: Colors.black)),
-                  if (hidden) const Icon(Icons.casino, color: Colors.white),
-                ],
-              ),
-            );
-          },
-        ),
-      ),
-    );
   }
 }

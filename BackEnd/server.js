@@ -144,10 +144,61 @@ io.on('connection', (socket) => {
         const cleanCode = roomCode.toUpperCase().trim();
         const game = gameRooms.get(cleanCode);
         if (game) {
-            const result = game.placeBet(socket.id, amount); // Handles auto-start if all bet
+            const result = game.placeBet(socket.id, amount);
             if (result.error) {
                 socket.emit('error', { message: result.error });
             } else {
+                io.to(cleanCode).emit('betPlaced', {
+                    playerId: socket.id,
+                    amount,
+                    balance: result.balance,
+                });
+
+                if (result.roundData) {
+                    io.to(cleanCode).emit('roundStarted', {
+                        players: game.getActivePlayers(),
+                        dealerHand: result.roundData.dealerHand,
+                        status: result.roundData.status,
+                        currentTurnPlayerId: result.roundData.currentTurnPlayerId,
+                        roundNumber: result.roundData.roundNumber,
+                    });
+                }
+
+                broadcastUpdate(cleanCode, game);
+            }
+        }
+    });
+
+    socket.on('cancelBet', ({ roomCode }) => {
+        const cleanCode = roomCode.toUpperCase().trim();
+        const game = gameRooms.get(cleanCode);
+        if (game) {
+            const result = game.cancelBet(socket.id);
+            if (result.error) {
+                socket.emit('error', { message: result.error });
+            } else {
+                io.to(cleanCode).emit('betCancelled', {
+                    playerId: socket.id,
+                    balance: result.balance,
+                });
+                broadcastUpdate(cleanCode, game);
+            }
+        }
+    });
+
+    socket.on('takeLoan', ({ roomCode, amount }) => {
+        const cleanCode = roomCode.toUpperCase().trim();
+        const game = gameRooms.get(cleanCode);
+        if (game) {
+            const result = game.takeLoan(socket.id, amount);
+            if (result.error) {
+                socket.emit('error', { message: result.error });
+            } else {
+                io.to(cleanCode).emit('loanTaken', {
+                    playerId: socket.id,
+                    balance: result.balance,
+                    loanDebt: result.loanDebt,
+                });
                 broadcastUpdate(cleanCode, game);
             }
         }
@@ -159,10 +210,31 @@ io.on('connection', (socket) => {
         const game = gameRooms.get(cleanCode);
         if (game) {
             const result = game.playerAction(socket.id, action);
+            const actor = game.players.get(socket.id);
             if (result.error) {
                 socket.emit('error', { message: result.error });
             } else {
+                io.to(cleanCode).emit('actionResult', {
+                    ...result,
+                    slot: actor?.slot,
+                    currentTurnPlayerId: game.currentTurnPlayerId,
+                });
+
                 broadcastUpdate(cleanCode, game);
+
+                if (result.roundEnd) {
+                    io.to(cleanCode).emit('roundEnd', {
+                        dealerHand: result.roundEnd.dealerHand,
+                        results: result.roundEnd.results,
+                        nextRound: result.roundEnd.nextRound,
+                        status: game.gameStatus,
+                    });
+
+                    setTimeout(() => {
+                        game.startBettingPhase();
+                        broadcastUpdate(cleanCode, game);
+                    }, 5000);
+                }
             }
         }
     });

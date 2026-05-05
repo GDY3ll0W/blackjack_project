@@ -12,17 +12,23 @@ class SocketService {
   Function(Map<String, dynamic>)? onRoomJoined;
   Function(Map<String, dynamic>)? onRoomFull;
   Function(Map<String, dynamic>)? onPlayerListUpdate;
+  Function(Map<String, dynamic>)? onRoundStarted;
+  Function(Map<String, dynamic>)? onActionResult;
+  Function(Map<String, dynamic>)? onRoundEnd;
+  Function(Map<String, dynamic>)? onBetPlaced;
+  Function(Map<String, dynamic>)? onLoanTaken;
+  Function(Map<String, dynamic>)? onBetCancelled;
   Function(Map<String, dynamic>)? onError;
 
   // --- URL CONFIGURATION ---
-  final String cloudRunUrl = 'https://blackjack-backend-549147796202.us-central1.run.app';
+  final String cloudRunUrl = 'https://backend-549147796202.us-south1.run.app';
   final String localUrl = 'http://localhost:8080';
 
   void connect(String roomCode, {bool createRoomOnConnect = false}) {
     _createRoomOnConnect = createRoomOnConnect;
 
     // Use cloudRunUrl for production or localUrl for testing
-    socket = io.io(localUrl, <String, dynamic>{
+    socket = io.io(cloudRunUrl, <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
       'forceNew': true,
@@ -56,8 +62,13 @@ class SocketService {
     socket.on('roomJoined', (data) => onRoomJoined?.call(Map<String, dynamic>.from(data)));
     socket.on('roomFull', (data) => onRoomFull?.call(Map<String, dynamic>.from(data)));
     
-    // This is now our main listener for rounds, turns, and dealer cards[cite: 1, 2]
     socket.on('playerListUpdate', (data) => onPlayerListUpdate?.call(Map<String, dynamic>.from(data)));
+    socket.on('roundStarted', (data) => onRoundStarted?.call(Map<String, dynamic>.from(data)));
+    socket.on('actionResult', (data) => onActionResult?.call(Map<String, dynamic>.from(data)));
+    socket.on('roundEnd', (data) => onRoundEnd?.call(Map<String, dynamic>.from(data)));
+    socket.on('betPlaced', (data) => onBetPlaced?.call(Map<String, dynamic>.from(data)));
+    socket.on('loanTaken', (data) => onLoanTaken?.call(Map<String, dynamic>.from(data)));
+    socket.on('betCancelled', (data) => onBetCancelled?.call(Map<String, dynamic>.from(data)));
     
     socket.on('error', (data) {
       print('Server Error: $data');
@@ -93,6 +104,19 @@ class SocketService {
     socket.emit('placeBet', {
       'roomCode': roomCode,
       'amount': amount
+    });
+  }
+
+  void cancelBet(String roomCode) {
+    socket.emit('cancelBet', {
+      'roomCode': roomCode,
+    });
+  }
+
+  void takeLoan(String roomCode, int amount) {
+    socket.emit('takeLoan', {
+      'roomCode': roomCode,
+      'amount': amount,
     });
   }
 

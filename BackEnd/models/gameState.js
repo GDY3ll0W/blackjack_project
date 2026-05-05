@@ -134,7 +134,6 @@ class GameState {
         }
 
         this.currentTurnPlayerId = null; // Everyone bets simultaneously
-        this.startTurnTimer(); // Global phase timer
     }
 
     placeBet(playerId, amount) {
@@ -149,19 +148,46 @@ class GameState {
         player.bet = amount;
         player.balance -= amount;
         player.status = 'bet_placed';
-        player.isReady = true; //[cite: 4] Mark as ready once bet is in
+        player.isReady = true;
 
-        this.checkAllBetsPlaced();
+        const roundData = this.checkAllBetsPlaced();
+        return { success: true, balance: player.balance, roundData };
+    }
+
+    cancelBet(playerId) {
+        const player = this.players.get(playerId);
+        if (!player || this.gameStatus !== 'betting' || player.status !== 'bet_placed') {
+            return { error: "Cannot cancel bet now" };
+        }
+
+        player.balance += player.bet;
+        player.bet = 0;
+        player.status = 'waiting';
+        player.isReady = false;
+
         return { success: true, balance: player.balance };
+    }
+
+    takeLoan(playerId, amount) {
+        const player = this.players.get(playerId);
+        if (!player || this.gameStatus !== 'betting') {
+            return { error: "Loans are only available during betting" };
+        }
+        if (amount <= 0) return { error: "Invalid loan amount" };
+
+        player.balance += amount;
+        player.loanDebt += amount;
+        return { success: true, balance: player.balance, loanDebt: player.loanDebt };
     }
 
     checkAllBetsPlaced() {
         const activePlayers = this.getActivePlayers();
-        const allBetOrReady = activePlayers.every(p => p.status === 'bet_placed' || p.status === 'skipped'); //[cite: 4]
+        const allBetOrReady = activePlayers.every(p => p.status === 'bet_placed' || p.status === 'skipped');
 
         if (allBetOrReady) {
-            this.startRound();
+            return this.startRound();
         }
+        return null;
     }
 
     // --- GAMEPLAY PHASE ---
@@ -186,7 +212,9 @@ class GameState {
 
         return {
             dealerHand: [this.dealerHand[0], { rank: 'Hidden', suit: 'Hidden' }],
-            status: this.gameStatus
+            status: this.gameStatus,
+            currentTurnPlayerId: this.currentTurnPlayerId,
+            roundNumber: this.roundNumber,
         };
     }
 
@@ -207,10 +235,11 @@ class GameState {
 
         if (this.playerOrder.length === 0) {
             this.gameStatus = 'waiting';
-            return;
+            return null;
         }
 
-        let nextIndex = (this.playerOrder.indexOf(this.currentTurnPlayerId) + 1) % this.playerOrder.length;
+        const currentIndex = this.playerOrder.indexOf(this.currentTurnPlayerId);
+        let nextIndex = currentIndex >= 0 ? (currentIndex + 1) % this.playerOrder.length : 0;
         let attempts = 0;
         while (attempts < this.playerOrder.length) {
             const nextPlayerId = this.playerOrder[nextIndex];
@@ -218,13 +247,13 @@ class GameState {
             if (player && player.status === 'playing') {
                 this.currentTurnPlayerId = nextPlayerId;
                 this.startTurnTimer();
-                return;
+                return null;
             }
             nextIndex = (nextIndex + 1) % this.playerOrder.length;
             attempts++;
         }
 
-        this.dealerTurn(); // If no more players are 'playing', it's dealer's turn
+        return this.dealerTurn(); // If no more players are 'playing', it's dealer's turn
     }
 
     playerAction(playerId, action) {
@@ -241,16 +270,16 @@ class GameState {
 
             if (score > 21) {
                 player.status = 'bust';
-                this.nextTurn();
-                return { action: 'bust', card: newCard, score, playerId };
+                const roundEnd = this.nextTurn();
+                return { action: 'bust', card: newCard, score, playerId, currentTurnPlayerId: this.currentTurnPlayerId, roundEnd };
             }
-            return { action: 'hit', card: newCard, score, playerId };
+            return { action: 'hit', card: newCard, score, playerId, currentTurnPlayerId: this.currentTurnPlayerId };
         }
 
         if (action === 'stand') {
             player.status = 'stood';
-            this.nextTurn();
-            return { action: 'stand', playerId };
+            const roundEnd = this.nextTurn();
+            return { action: 'stand', playerId, currentTurnPlayerId: this.currentTurnPlayerId, roundEnd };
         }
 
         if (action === 'double_down') {
@@ -260,8 +289,9 @@ class GameState {
             const newCard = this.deck.dealCard();
             player.hand.push(newCard);
             player.status = this.calculateScore(player.hand) > 21 ? 'bust' : 'stood';
-            this.nextTurn();
-            return { action: 'double_down', card: newCard, score: this.calculateScore(player.hand), newBet: player.bet, playerId };
+            const score = this.calculateScore(player.hand);
+            const roundEnd = this.nextTurn();
+            return { action: 'double_down', card: newCard, score, newBet: player.bet, playerId, currentTurnPlayerId: this.currentTurnPlayerId, roundEnd };
         }
 
         return { error: "Invalid action" };
@@ -277,11 +307,11 @@ class GameState {
             dealerScore = this.calculateScore(this.dealerHand);
         }
 
-        this.resolveRound(dealerScore);
+        return this.resolveRound(dealerScore);
     }
 
     resolveRound(dealerScore) {
-        this.gameStatus = 'game_over'; //[cite: 1]
+        this.gameStatus = 'game_over';
         const results = [];
 
         for (const player of this.players.values()) {
@@ -297,6 +327,11 @@ class GameState {
                 player.balance += (player.bet * 2);
                 player.wins++;
                 result = 'win';
+                if (player.loanDebt > 0) {
+                    const repayment = Math.min(player.loanDebt, player.bet);
+                    player.loanDebt -= repayment;
+                    player.balance -= repayment;
+                }
             } else if (playerScore === dealerScore) {
                 player.balance += player.bet;
                 player.pushes++;
@@ -306,19 +341,14 @@ class GameState {
                 result = 'lose';
             }
 
-            results.push({ playerId: player.id, result, balance: player.balance });
+            results.push({ playerId: player.id, result, balance: player.balance, loanDebt: player.loanDebt, wins: player.wins, losses: player.losses, pushes: player.pushes });
             
-            // Reset player for the next round loop[cite: 1]
-            player.isReady = false; 
+            player.isReady = false;
             player.status = 'waiting';
         }
 
-        this.roundNumber++; //[cite: 1]
-
-        // 5 second delay to let players see the Round Results before resetting[cite: 1]
-        setTimeout(() => {
-            this.startBettingPhase();
-        }, 5000);
+        this.currentTurnPlayerId = null;
+        this.roundNumber++;
 
         return { dealerHand: this.dealerHand, dealerScore, results, nextRound: this.roundNumber };
     }
