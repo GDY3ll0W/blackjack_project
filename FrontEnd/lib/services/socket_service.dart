@@ -2,77 +2,106 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class SocketService {
   late io.Socket socket;
+  bool _createRoomOnConnect = false;
 
-  // Your actual Live Google Cloud Run URL
-  final String cloudRunUrl = 'https://blackjack-backend-549147796202.us-central1.run.app'; 
+  // Callbacks for UI updates
+  Function()? onConnected;
+  Function(dynamic)? onConnectErrorCallback;
+  Function()? onDisconnected;
+  Function(Map<String, dynamic>)? onRoomCreated;
+  Function(Map<String, dynamic>)? onRoomJoined;
+  Function(Map<String, dynamic>)? onRoomFull;
+  Function(Map<String, dynamic>)? onPlayerListUpdate;
+  Function(Map<String, dynamic>)? onError;
 
-  void connect(String roomCode) {
-    // We use websocket transport for Cloud Run compatibility
-    socket = io.io(cloudRunUrl, <String, dynamic>{
+  // --- URL CONFIGURATION ---
+  final String cloudRunUrl = 'https://blackjack-backend-549147796202.us-central1.run.app';
+  final String localUrl = 'http://localhost:8080';
+
+  void connect(String roomCode, {bool createRoomOnConnect = false}) {
+    _createRoomOnConnect = createRoomOnConnect;
+
+    // Use cloudRunUrl for production or localUrl for testing
+    socket = io.io(localUrl, <String, dynamic>{
       'transports': ['websocket'],
-      'autoConnect': true,
-      'extraHeaders': {
-        'Connection': 'upgrade',
-        'Upgrade': 'websocket'
+      'autoConnect': false,
+      'forceNew': true,
+    });
+
+    // --- CONNECTION EVENTS ---
+    socket.onConnect((_) {
+      print('--- Connected to Blackjack Backend ---');
+      onConnected?.call();
+      if (_createRoomOnConnect) {
+        createRoom();
+      } else if (roomCode.isNotEmpty) {
+        joinRoom(roomCode);
       }
     });
 
-    socket.onConnect((_) {
-      print('--- Connected to Blackjack Backend ---');
-      // Automatically join the table upon connection
-      joinRoom(roomCode);
+    socket.onConnectError((err) {
+      print('Connect error: $err');
+      onConnectErrorCallback?.call(err);
+      onError?.call({'message': 'Unable to connect to backend.'});
     });
 
-    socket.onDisconnect((_) => print('Disconnected from Backend'));
+    socket.onDisconnect((_) {
+      print('Disconnected from Backend');
+      onDisconnected?.call();
+    });
 
     // --- GAME LISTENERS ---
-
-    // 1. Initial State (Balance & Room Info)
-    socket.on('initialState', (data) {
-      print('Connected! Current Balance: ${data['balance']}');
-      // Update your UI balance variable here
-    });
-
-    // 2. Game Started (Initial Deal)
-    socket.on('gameStarted', (data) {
-      print('Game has started! Player Hand: ${data['playerHand']}');
-      // Update your UI lists for player and dealer cards
-    });
-
-    // 3. Card Dealt (Result of a 'Hit')
-    socket.on('cardDealt', (data) {
-      print('New card received: ${data['card']}');
-      // Add this card to your player's hand list
-    });
-
-    // 4. Game Over (Dealer results and Payouts)
-    socket.on('gameOver', (data) {
-      print('Result: ${data['message']}');
-      print('Dealer final hand: ${data['dealerHand']}');
-      // Show the 'New Game' button in your UI
-    });
-
-    // 5. Error Handling
+    // These match the emitters in server.js
+    socket.on('roomCreated', (data) => onRoomCreated?.call(Map<String, dynamic>.from(data)));
+    socket.on('roomJoined', (data) => onRoomJoined?.call(Map<String, dynamic>.from(data)));
+    socket.on('roomFull', (data) => onRoomFull?.call(Map<String, dynamic>.from(data)));
+    
+    // This is now our main listener for rounds, turns, and dealer cards[cite: 1, 2]
+    socket.on('playerListUpdate', (data) => onPlayerListUpdate?.call(Map<String, dynamic>.from(data)));
+    
     socket.on('error', (data) {
-      print('Server Error: ${data['message']}');
+      print('Server Error: $data');
+      if (data is Map) {
+        onError?.call(Map<String, dynamic>.from(data));
+      } else {
+        onError?.call({'message': data.toString()});
+      }
     });
+
+    socket.connect();
   }
 
-  // --- ACTIONS ---
+  // --- EMITTERS ---
+  void createRoom() {
+    print('Emitting createRoom');
+    socket.emit('createRoom');
+  }
 
   void joinRoom(String roomCode) {
     print('Joining room: $roomCode');
     socket.emit('joinRoom', roomCode);
   }
 
-  void placeBet(double amount) {
-    print('Placing bet: $amount');
-    socket.emit('placeBet', {'amount': amount});
+  // Tells server player is ready to start the round[cite: 4]
+  void toggleReady(String roomCode) {
+    print('Toggling ready for room: $roomCode');
+    socket.emit('toggleReady', roomCode);
   }
 
-  void playAction(String action) {
-    print('Player action: $action');
-    socket.emit('playerAction', {'action': action});
+  // Sends the bet amount for the current round
+  void placeBet(String roomCode, double amount) {
+    socket.emit('placeBet', {
+      'roomCode': roomCode,
+      'amount': amount
+    });
+  }
+
+  // Sends Hit, Stand, or Double action
+  void playAction(String roomCode, String action) {
+    socket.emit('playerAction', {
+      'roomCode': roomCode,
+      'action': action
+    });
   }
 
   void disconnect() {

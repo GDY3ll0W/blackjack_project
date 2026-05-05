@@ -1,13 +1,17 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+import 'package:flutter/material.dart';
 import '../logic/deck.dart';
 import '../models/card.dart' as model_card;
 import '../services/audio_service.dart';
+import '../services/socket_service.dart';
 
 class GameView extends StatefulWidget {
   final String nickname;
   final String avatarPath;
   final String? roomCode;
   final bool isMultiplayer;
+  final String? playerId;
+  final SocketService? socketService;
 
   const GameView({
     super.key,
@@ -15,6 +19,8 @@ class GameView extends StatefulWidget {
     required this.avatarPath,
     this.roomCode,
     this.isMultiplayer = false,
+    this.playerId,
+    this.socketService,
   });
 
   @override
@@ -41,6 +47,7 @@ class _GameViewState extends State<GameView> {
   String gameMessage = 'Place a bet to start';
   bool gameActive = false;
   bool hideDealerHoleCard = true;
+  bool amIReady = false;
   bool hasWon = false;
   RoundEffectType roundEffect = RoundEffectType.none;
   bool resultPop = false;
@@ -51,6 +58,16 @@ class _GameViewState extends State<GameView> {
   bool hoveredAllIn = false;
   bool hoveredCustom = false;
   bool hoveredClearBet = false;
+
+  // Multiplayer state
+  late SocketService socketService;
+  String? currentPlayerId;
+  List<Map<String, dynamic>> players = [];
+  String? currentTurnPlayerId;
+  String gameStatus = 'waiting';
+  Timer? turnTimer;
+  int timeLeft = 30;
+  bool isMyTurn = false;
 
   final List<int> betValues = [5, 10, 20, 25, 50, 100, 150, 200];
   final Map<int, Color> betColors = {
@@ -76,117 +93,202 @@ class _GameViewState extends State<GameView> {
     super.initState();
     resetGame();
     AudioService.playBackgroundMusic();
-  }
 
-  void resetGame() {
-    deck = Deck(numDecks: 6);
-    playerHands = [[]];
-    playerBets = [0];
-    dealerHand = [];
-    currentHandIndex = 0;
-    currentBet = 0;
-    wins = 0;
-    losses = 0;
-    pushes = 0;
-    loanDebt = 0;
-    lastRideAmount = 0;
-    winStreak = 0;
-    letItRideCounter = 0;
-    gameMessage = 'Place a bet to start';
-    gameActive = false;
-    hideDealerHoleCard = true;
-    hasWon = false;
-    roundEffect = RoundEffectType.none;
-    resultPop = false;
-    selectedBetAmount = -1;
-    selectedAllIn = false;
-    selectedCustom = false;
-    hoveredBetAmount = -1;
-    hoveredAllIn = false;
-    hoveredCustom = false;
-    hoveredClearBet = false;
-    setState(() {});
-  }
+    if (widget.isMultiplayer) {
+      socketService = widget.socketService ?? SocketService();
+      currentPlayerId = widget.playerId;
 
-  void setRoundEffect(RoundEffectType effect) {
-    roundEffect = effect;
-    resultPop = true;
-    setState(() {});
+      // Set up socket listeners
+      setupSocketListeners();
 
-    Future.delayed(const Duration(milliseconds: 450), () {
-      if (!mounted) return;
-      setState(() => resultPop = false);
-    });
-
-    Future.delayed(const Duration(milliseconds: 900), () {
-      if (!mounted) return;
-      if (roundEffect == effect) {
-        setState(() => roundEffect = RoundEffectType.none);
-      }
-    });
-  }
-
-  void clearSelectedBet() {
-    selectedBetAmount = -1;
-    selectedAllIn = false;
-    selectedCustom = false;
-    hoveredBetAmount = -1;
-    hoveredAllIn = false;
-    hoveredCustom = false;
-    hoveredClearBet = false;
-  }
-
-  int calculateScore(List<model_card.Card> hand) {
-    int total = 0;
-    int aces = 0;
-
-    for (final card in hand) {
-      if (card.rank == 'Ace') {
-        total += 11;
-        aces += 1;
-      } else if (['Jack', 'Queen', 'King'].contains(card.rank)) {
-        total += 10;
-      } else {
-        total += int.parse(card.rank);
+      if (widget.socketService == null) {
+        // If no socket service provided, we need to connect
+        socketService.connect(widget.roomCode ?? '');
       }
     }
+  }
 
-    while (total > 21 && aces > 0) {
-      total -= 10;
-      aces -= 1;
+  void setupSocketListeners() {
+  socketService.onRoomJoined = (data) {
+    if (mounted) {
+      setState(() {
+        currentPlayerId = data['playerId'];
+        players = List<Map<String, dynamic>>.from(data['players']);
+        gameStatus = data['gameStatus'];
+        currentTurnPlayerId = data['currentTurnPlayerId'];
+        updateMyTurn();
+      });
     }
+  };
 
-    return total;
+  socketService.onPlayerListUpdate = (data) {
+    if (mounted) {
+      setState(() {
+        // Sync the game phase and whose turn it is
+        gameStatus = data['gameStatus']?.toString() ?? gameStatus;
+        currentTurnPlayerId = data['currentTurnPlayerId'];
+        players = List<Map<String, dynamic>>.from(data['players']);
+
+        // Sync your specific status from the server's player list
+        final me = players.firstWhere((p) => p['id'] == currentPlayerId, orElse: () => {});
+        if (me.isNotEmpty) {
+          amIReady = me['isReady'] ?? false;
+          // Sync balance to ensure UI matches server database
+          balance = (me['balance'] ?? balance).toInt();
+        }
+
+        updateMyTurn();
+        
+        // Start turn timer if it's now your turn
+        if (isMyTurn && (gameStatus == 'betting' || gameStatus == 'playing')) {
+          startTurnTimer();
+        }
+      });
+    }
+  };
+
+  socketService.onRoundStarted = (data) {
+    if (mounted) {
+      setState(() {
+        // 1. Sync Dealer Hand from Server
+        dealerHand = List<model_card.Card>.from(
+          data['dealerHand'].map((card) => model_card.Card.fromJson(card))
+        );
+        hideDealerHoleCard = true; 
+
+        // 2. Sync Game State
+        currentTurnPlayerId = data['currentTurnPlayerId'];
+        gameStatus = data['status'];
+        gameActive = true;
+
+        // 3. Sync all players' hands (Crucial for seeing partners)
+        final playersData = data['players'];
+        for (final playerData in playersData) {
+          if (playerData['id'] == currentPlayerId) {
+            playerHands = [
+              List<model_card.Card>.from(playerData['hand'].map((card) => model_card.Card.fromJson(card)))
+            ];
+            playerBets = [(playerData['bet'] ?? 0).toInt()];
+            balance = (playerData['balance'] ?? balance).toInt();
+          }
+        }
+        
+        updateMyTurn();
+        gameMessage = isMyTurn ? "Your turn!" : "Round Started - Waiting...";
+      });
+      AudioService.playDealSound();
+    }
+  };
+
+  socketService.onActionResult = (data) {
+    if (mounted) {
+      setState(() {
+        // If the action happened to YOU, update your local hand
+        if (data['playerId'] == currentPlayerId) {
+          if (data['action'] == 'hit' || data['action'] == 'double_down') {
+            playerHands[0].add(model_card.Card.fromJson(data['card']));
+          }
+        }
+        // Update message to show what happened at the table
+        gameMessage = 'Player ${data['slot'] ?? data['playerId']} ${data['action']}s';
+      });
+    }
+  };
+
+  socketService.onRoundEnd = (data) {
+    if (mounted) {
+      setState(() {
+        // 1. Reveal Dealer's Hand
+        dealerHand = List<model_card.Card>.from(
+          data['dealerHand'].map((card) => model_card.Card.fromJson(card))
+        );
+        hideDealerHoleCard = false;
+        
+        // 2. Process Results
+        for (final result in data['results']) {
+          if (result['playerId'] == currentPlayerId) {
+            balance = (result['newBalance'] ?? balance).toInt();
+            
+            // Trigger your existing visual effects
+            if (result['result'] == 'win') {
+              setRoundEffect(RoundEffectType.win);
+              wins++;
+            } else if (result['result'] == 'lose') {
+              setRoundEffect(RoundEffectType.lose);
+              losses++;
+            } else {
+              setRoundEffect(RoundEffectType.push);
+              pushes++;
+            }
+          }
+        }
+        
+        gameActive = false;
+        gameStatus = 'LOBBY';
+        gameMessage = 'Round ended!';
+      });
+    }
+  };
+
+  socketService.onBetPlaced = (data) {
+    if (mounted) {
+      setState(() {
+        if (data['playerId'] == currentPlayerId) {
+          balance = (data['balance'] ?? balance).toInt();
+          gameMessage = 'Bet confirmed: Ω${data['amount']}';
+        }
+      });
+    }
+  };
+
+  socketService.onError = (data) {
+    if (mounted) {
+      setState(() {
+        gameMessage = 'Error: ${data['message']}';
+      });
+    }
+  };
+}
+
+void updateMyTurn() {
+  bool wasMyTurn = isMyTurn;
+  isMyTurn = currentTurnPlayerId == currentPlayerId;
+  
+  // If it just became our turn, give visual/audio feedback
+  if (isMyTurn && !wasMyTurn) {
+    if (gameStatus == 'betting') {
+      gameMessage = 'Your turn to bet!';
+    } else if (gameStatus == 'playing') {
+      gameMessage = 'Your turn! Hit or Stand?';
+    }
+  }
+}
+
+void startTurnTimer() {
+  if (turnTimer != null) {
+    turnTimer!.cancel();
+    turnTimer = null;
   }
 
-  String handText(List<model_card.Card> hand) {
-    if (hand.isEmpty) return '';
-    final cardNames = hand.map((card) => card.rank).join(' + ');
-    return '$cardNames = ${calculateScore(hand)}';
-  }
+  // Only run local visual timer if it's actually our turn
+  if (!isMyTurn) return;
 
-  bool sameValue(model_card.Card? cardA, model_card.Card? cardB) {
-    if (cardA == null || cardB == null) return false;
-    return cardA.rank == cardB.rank;
-  }
+  timeLeft = 30;
+  turnTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    if (mounted) {
+      setState(() {
+        timeLeft--;
+        if (timeLeft <= 0) {
+          timer.cancel();
+          // Safety: Auto-stand or skip if player is AFK
+          if (gameStatus == 'playing') stand();
+        }
+      });
+    }
+  });
+}
 
-  bool canSplit() {
-    if (!gameActive) return false;
-    if (playerHands.length != 1) return false;
-    final hand = playerHands[0];
-    if (hand.length != 2) return false;
-    if (!sameValue(hand[0], hand[1])) return false;
-    return balance >= playerBets[0];
-  }
-
-  bool canDoubleDown() {
-    if (!gameActive) return false;
-    final hand = playerHands[currentHandIndex];
-    if (hand.length != 2) return false;
-    return balance >= 2 * playerBets[currentHandIndex];
-  }
-
-  void placeBet(int amount, {bool fromAllIn = false, bool fromCustom = false}) {
+    // Single player logic
     if (gameActive) {
       setState(() => gameMessage = 'Finish the current round first');
       return;
@@ -227,6 +329,12 @@ class _GameViewState extends State<GameView> {
   }
 
   void dealRound() {
+    if (widget.isMultiplayer) {
+      // In multiplayer, betting is handled separately
+      return;
+    }
+
+    // Single player logic
     if (gameActive) {
       setState(() => gameMessage = 'Finish the current round first');
       return;
@@ -323,6 +431,16 @@ class _GameViewState extends State<GameView> {
   }
 
   void hit() {
+    if (widget.isMultiplayer) {
+      if (!isMyTurn || gameStatus != 'playing') {
+        setState(() => gameMessage = 'Not your turn');
+        return;
+      }
+      socketService.playAction('hit');
+      return;
+    }
+
+    // Single player logic
     if (!gameActive) {
       setState(() => gameMessage = 'Start a round first!');
       return;
@@ -345,6 +463,16 @@ class _GameViewState extends State<GameView> {
   }
 
   void stand() {
+    if (widget.isMultiplayer) {
+      if (!isMyTurn || gameStatus != 'playing') {
+        setState(() => gameMessage = 'Not your turn');
+        return;
+      }
+      socketService.playAction('stand');
+      return;
+    }
+
+    // Single player logic
     if (!gameActive) {
       setState(() => gameMessage = 'Start a round first!');
       return;
@@ -533,10 +661,14 @@ class _GameViewState extends State<GameView> {
   }
 
   void takeLoan(int amount) {
-    if (amount <= 0) return;
-    balance += amount;
-    loanDebt += amount;
-    setState(() => gameMessage = '💵 You took out a \$${formatNumber(amount)} loan. Future winnings will repay it.');
+    if (widget.isMultiplayer) {
+      socketService.takeLoan(amount);
+    } else {
+      if (amount <= 0) return;
+      balance += amount;
+      loanDebt += amount;
+      setState(() => gameMessage = '💵 You took out a \$${formatNumber(amount)} loan. Future winnings will repay it.');
+    }
   }
 
   void letItRide() {
@@ -564,6 +696,11 @@ class _GameViewState extends State<GameView> {
   }
 
   Future<void> customBet() async {
+    if (widget.isMultiplayer && (!isMyTurn || gameStatus != 'betting')) {
+      setState(() => gameMessage = 'Not your turn to place a bet');
+      return;
+    }
+
     final controller = TextEditingController();
     final result = await showDialog<String>(
       context: context,
@@ -730,29 +867,34 @@ class _GameViewState extends State<GameView> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        // Show confirmation dialog before going back
-        final shouldPop = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Exit Game?'),
-            content: Text(widget.isMultiplayer 
-              ? 'Leaving will disconnect you from the room.' 
-              : 'Your progress will be lost.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Exit'),
-              ),
-            ],
-          ),
-        );
-        return shouldPop ?? false;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (!didPop) {
+          // Show confirmation dialog before going back
+          final shouldPop = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Exit Game?'),
+              content: Text(widget.isMultiplayer
+                ? 'Leaving will disconnect you from the room.'
+                : 'Your progress will be lost.'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Exit'),
+                ),
+              ],
+            ),
+          );
+          if (shouldPop ?? false && mounted) {
+            Navigator.pop(context);
+          }
+        }
       },
       child: Scaffold(
         appBar: AppBar(
@@ -790,6 +932,104 @@ class _GameViewState extends State<GameView> {
             ),
           ),
           
+          // LOBBY LIST (Top Right) - Only in multiplayer
+          if (widget.isMultiplayer)
+            Positioned(
+              top: 20,
+              right: 20,
+              child: Container(
+                width: 200,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber, width: 2),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Room Lobby',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...players.map((player) {
+                      final isCurrentPlayer = player['id'] == currentPlayerId;
+                      final isCurrentTurn = player['id'] == currentTurnPlayerId;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isCurrentTurn 
+                              ? Colors.amber.withOpacity(0.3)
+                              : isCurrentPlayer 
+                                  ? Colors.blue.withOpacity(0.3)
+                                  : Colors.white.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          children: [
+                            Text(
+                              'Player ${player['slot']}',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: isCurrentPlayer ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                            if (isCurrentTurn) ...[
+                              const SizedBox(width: 4),
+                              const Icon(Icons.access_time, color: Colors.amber, size: 14),
+                            ],
+                            const Spacer(),
+                            Text(
+                              'Ω${formatNumber(player['balance'] ?? 0)}',
+                              style: const TextStyle(
+                                color: Colors.lightGreen,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    if (players.isEmpty)
+                      const Text(
+                        'Waiting for players...',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+
+          // TURN TIMER (Top Center) - Only in multiplayer when it's someone's turn
+          if (widget.isMultiplayer && isMyTurn && timeLeft > 0)
+            Positioned(
+              top: 20,
+              left: MediaQuery.of(context).size.width / 2 - 50,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.amber, width: 2),
+                ),
+                child: Text(
+                  'Time: ${timeLeft}s',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          
           // PLAYER AVATAR (Left side)
           Positioned(
             left: 135,
@@ -822,14 +1062,17 @@ class _GameViewState extends State<GameView> {
                     Text('Balance: Ω${formatNumber(balance)}', 
                       style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
                     const SizedBox(height: 4),
-                    Text('Current Bet: Ω${formatNumber(currentBet)}', 
-                      style: const TextStyle(color: Colors.white, fontSize: 20, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
-                    const SizedBox(height: 4),
-                    Text('Loan Debt: Ω${formatNumber(loanDebt)}', 
-                      style: const TextStyle(color: Colors.orange, fontSize: 20, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
-                    const SizedBox(height: 4),
-                    Text('Wins: $wins | Losses: $losses | Pushes: $pushes', 
-                      style: const TextStyle(color: Colors.lightGreen, fontSize: 18, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
+                    if (!widget.isMultiplayer)
+                      Text('Current Bet: Ω${formatNumber(currentBet)}', 
+                        style: const TextStyle(color: Colors.white, fontSize: 20, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
+                    if (!widget.isMultiplayer) ...[
+                      const SizedBox(height: 4),
+                      Text('Loan Debt: Ω${formatNumber(loanDebt)}', 
+                        style: const TextStyle(color: Colors.orange, fontSize: 20, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
+                      const SizedBox(height: 4),
+                      Text('Wins: $wins | Losses: $losses | Pushes: $pushes', 
+                        style: const TextStyle(color: Colors.lightGreen, fontSize: 18, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
+                    ],
                     const SizedBox(height: 12),
                     AnimatedScale(
                       scale: resultPop ? 1.1 : 1.0,
@@ -931,7 +1174,7 @@ class _GameViewState extends State<GameView> {
                     const SizedBox(height: 16),
                     
                     // ACTION BUTTONS (Hit, Stand, Double Down, Split)
-                    if (gameActive)
+                    if ((widget.isMultiplayer && isMyTurn && gameStatus == 'playing') || (!widget.isMultiplayer && gameActive))
                       Column(
                         children: [
                           Wrap(
@@ -949,34 +1192,26 @@ class _GameViewState extends State<GameView> {
                                 style: buildButtonStyle(Colors.blue[700]!, hoverColor: Colors.blue[500]),
                                 child: const Text('Stand', style: TextStyle(fontWeight: FontWeight.bold)),
                               ),
-                              ElevatedButton(
-                                onPressed: canDoubleDown() ? doubleDown : null,
-                                style: buildButtonStyle(Colors.purple[700]!, hoverColor: Colors.purple[500]),
-                                child: const Text('Double Down', style: TextStyle(fontWeight: FontWeight.bold)),
-                              ),
-                              ElevatedButton(
-                                onPressed: canSplit() ? splitHand : null,
-                                style: buildButtonStyle(Colors.brown[700]!, hoverColor: Colors.brown[500]),
-                                child: const Text('Split', style: TextStyle(fontWeight: FontWeight.bold)),
-                              ),
+                              if (!widget.isMultiplayer)
+                                ElevatedButton(
+                                  onPressed: canDoubleDown() ? doubleDown : null,
+                                  style: buildButtonStyle(Colors.purple[700]!, hoverColor: Colors.purple[500]),
+                                  child: const Text('Double Down', style: TextStyle(fontWeight: FontWeight.bold)),
+                                ),
+                              if (!widget.isMultiplayer)
+                                ElevatedButton(
+                                  onPressed: canSplit() ? splitHand : null,
+                                  style: buildButtonStyle(Colors.brown[700]!, hoverColor: Colors.brown[500]),
+                                  child: const Text('Split', style: TextStyle(fontWeight: FontWeight.bold)),
+                                ),
                             ],
                           ),
                           const SizedBox(height: 12),
                         ],
                       ),
                     
-                    // START ROUND BUTTON
-                    if (!gameActive)
-                      ElevatedButton(
-                        onPressed: dealRound,
-                        style: buildButtonStyle(Colors.green[800]!, hoverColor: Colors.green[600]),
-                        child: const Text('Start Round', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      ),
-                    
-                    const SizedBox(height: 16),
-                    
-                    // BET CHIPS
-                    if (!gameActive)
+                    // BET CHIPS - Only show in single player or multiplayer betting phase
+                    if ((!widget.isMultiplayer && !gameActive) || (widget.isMultiplayer && isMyTurn && gameStatus == 'betting'))
                       Column(
                         children: [
                           const Text('Bet Options', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
@@ -988,7 +1223,7 @@ class _GameViewState extends State<GameView> {
                             children: betValues.map(buildBetChip).toList(),
                           ),
                           const SizedBox(height: 10),
-                          // CLEAR BET, ALL IN / LET IT RIDE & CUSTOM
+                          // CLEAR BET, ALL IN & CUSTOM
                           Wrap(
                             alignment: WrapAlignment.center,
                             spacing: 10,
@@ -1002,17 +1237,20 @@ class _GameViewState extends State<GameView> {
                                 isHovered: hoveredClearBet,
                               ),
                               buildBetActionChip(
-                                label: winStreak > 0 && balance > 0 ? 'LET IT\nRIDE' : 'ALL IN',
-                                color: winStreak > 0 && balance > 0 ? Colors.amber[600]! : Colors.red[900]!,
+                                label: !widget.isMultiplayer && winStreak > 0 ? 'LET IT\nRIDE' : 'ALL IN',
+                                color: Colors.red[900]!,
                                 onTap: () {
-                                  if (gameActive) {
-                                    setState(() => gameMessage = 'Finish the current round first');
-                                    return;
-                                  }
-
-                                  if (winStreak > 0 && balance > 0) {
-                                    letItRide();
+                                  if (widget.isMultiplayer) {
+                                    if (!isMyTurn || gameStatus != 'betting') {
+                                      setState(() => gameMessage = 'Not your turn to bet');
+                                      return;
+                                    }
+                                    placeBet(balance);
                                   } else {
+                                    if (winStreak > 0) {
+                                      letItRide();
+                                      return;
+                                    }
                                     currentBet = balance;
                                     selectedBetAmount = -1;
                                     selectedAllIn = true;
@@ -1033,6 +1271,14 @@ class _GameViewState extends State<GameView> {
                             ],
                           ),
                           const SizedBox(height: 16),
+                          if (!widget.isMultiplayer && !gameActive && currentBet > 0)
+                            ElevatedButton(
+                              onPressed: dealRound,
+                              style: buildButtonStyle(Colors.green[700]!, hoverColor: Colors.green[500]),
+                              child: const Text('Start Round', style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                          if (!widget.isMultiplayer && !gameActive && winStreak > 0)
+                            const SizedBox(height: 16),
                         ],
                       ),
                     
@@ -1089,10 +1335,67 @@ class _GameViewState extends State<GameView> {
               ),
             ),
           ),
+        if (widget.isMultiplayer && (gameStatus == 'waiting' || gameStatus == 'LOBBY' || gameStatus == 'STARTING'))
+            _buildLobbyOverlay(),
         ],
-      ),
+      ), // Stack
       ),
     );
+  }
+Widget _buildLobbyOverlay() {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: Colors.black.withOpacity(0.85),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.group, color: Colors.amber, size: 80),
+          const SizedBox(height: 20),
+          Text("ROOM: ${widget.roomCode}", style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          const Text("Wait for your partners to be ready", style: TextStyle(color: Colors.white70)),
+          const SizedBox(height: 40),
+          Container(
+            width: 350,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(15)),
+            child: Column(
+              children: players.map((player) {
+                bool ready = player['isReady'] ?? false;
+                bool isMe = player['id'] == currentPlayerId;
+                return ListTile(
+                  leading: CircleAvatar(backgroundColor: isMe ? Colors.amber : Colors.blueGrey),
+                  title: Text(isMe ? "You" : "Partner", style: const TextStyle(color: Colors.white)),
+                  trailing: Icon(ready ? Icons.check_circle : Icons.hourglass_empty, color: ready ? Colors.green : Colors.grey),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 50),
+          SizedBox(
+            width: 250,
+            height: 60,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: amIReady ? Colors.red : Colors.green),
+              onPressed: () {
+                socketService.toggleReady(widget.roomCode ?? ''); 
+              },
+              child: Text(amIReady ? "CANCEL READY" : "READY TO PLAY", style: const TextStyle(color: Colors.white)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  @override
+  void dispose() {
+    turnTimer?.cancel();
+    if (widget.isMultiplayer) {
+      socketService.disconnect();
+    }
+    super.dispose();
   }
 }
 
